@@ -21,6 +21,9 @@ class MusicGenConfig:
     device: str = "auto"
 
 
+_MODEL_CACHE: dict[tuple[str, str], tuple[Any, Any]] = {}
+
+
 def _device_name(requested: str) -> str:
     value = str(requested or "auto").strip().lower()
     if value == "auto":
@@ -45,6 +48,27 @@ def _to_mono(audio: np.ndarray) -> np.ndarray:
     raise ValueError("Audio prompt must be a mono or stereo waveform.")
 
 
+def _load_model(model_name: str, device: str):
+    key = (str(model_name), str(device))
+    cached = _MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    try:
+        from transformers import AutoProcessor, MusicgenMelodyForConditionalGeneration
+    except ImportError as exc:
+        raise RuntimeError(
+            "MusicGen dependencies are not installed. Install the optional AI stack with: "
+            "pip install -r requirements-ai.txt"
+        ) from exc
+
+    processor = AutoProcessor.from_pretrained(str(model_name))
+    model = MusicgenMelodyForConditionalGeneration.from_pretrained(str(model_name))
+    model = model.to(device).eval()
+    _MODEL_CACHE[key] = (processor, model)
+    return processor, model
+
+
 def generate_musicgen_melody(
     prompt_audio_path: str,
     text_prompt: str,
@@ -67,14 +91,15 @@ def generate_musicgen_melody(
 
     cfg = config or MusicGenConfig()
     duration = float(np.clip(cfg.duration_seconds, 1.0, 30.0))
+    temperature = max(0.01, float(cfg.temperature))
+    guidance_scale = max(1.0, float(cfg.guidance_scale))
     selected_device = _device_name(cfg.device)
 
     try:
         import torch
-        from transformers import AutoProcessor, MusicgenMelodyForConditionalGeneration
     except ImportError as exc:
         raise RuntimeError(
-            "MusicGen dependencies are not installed. Install the optional AI stack with: "
+            "PyTorch is not installed. Install the optional AI stack with: "
             "pip install -r requirements-ai.txt"
         ) from exc
 
@@ -82,10 +107,7 @@ def generate_musicgen_melody(
 
     prompt, prompt_sr = load_audio(str(source), mono=False)
     prompt = _to_mono(prompt)
-
-    processor = AutoProcessor.from_pretrained(cfg.model_name)
-    model = MusicgenMelodyForConditionalGeneration.from_pretrained(cfg.model_name)
-    model = model.to(selected_device).eval()
+    processor, model = _load_model(cfg.model_name, selected_device)
 
     inputs = processor(
         audio=prompt,
@@ -96,20 +118,21 @@ def generate_musicgen_melody(
     )
     inputs = {key: value.to(selected_device) if hasattr(value, "to") else value for key, value in inputs.items()}
 
-    # MusicGen Melody operates on an approximately 50-token/sec generation
-    # timeline, so duration is translated into a conservative token budget.
+    # MusicGen Melody uses an audio-token timeline near 50 steps/sec.
     max_new_tokens = max(50, min(1500, int(round(duration * 50.0))))
+    generation_kwargs: dict[str, Any] = {
+        "do_sample": True,
+        "guidance_scale": guidance_scale,
+        "temperature": temperature,
+        "top_k": int(max(0, cfg.top_k)),
+        "max_new_tokens": max_new_tokens,
+    }
+    top_p = float(cfg.top_p)
+    if top_p > 0.0:
+        generation_kwargs["top_p"] = float(np.clip(top_p, 1e-4, 1.0))
 
     with torch.inference_mode():
-        audio_values = model.generate(
-            **inputs,
-            do_sample=True,
-            guidance_scale=float(cfg.guidance_scale),
-            temperature=float(cfg.temperature),
-            top_k=int(max(0, cfg.top_k)),
-            top_p=float(np.clip(cfg.top_p, 0.0, 1.0)),
-            max_new_tokens=max_new_tokens,
-        )
+        audio_values = model.generate(**inputs, **generation_kwargs)
 
     audio = audio_values[0].detach().float().cpu().numpy()
     if audio.ndim == 2:
