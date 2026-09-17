@@ -6,7 +6,7 @@ AI-assisted audio editing and music production toolkit by **JE Jamal Odasi**.
 
 ## Current milestone
 
-The project now has a crash-resistant Gradio workspace plus lightweight DSP, neural transcription and optional neural vocal-enhancement foundations:
+The project now has a crash-resistant Gradio workspace plus lightweight DSP, neural transcription, neural vocal enhancement, neural pitch analysis/correction and vocal-conditioned music foundations:
 
 - Upload WAV / MP3 / FLAC / OGG / M4A when the runtime supports decoding
 - Audio inspection: duration, sample rate, channels, peak and RMS
@@ -16,8 +16,10 @@ The project now has a crash-resistant Gradio workspace plus lightweight DSP, neu
 - Basic Vocal Fix DSP with conservative noise reduction, de-essing, compression and high-pass filtering
 - Advanced Vocal Fix controls for noise reduction, de-reverb, pitch correction, timing correction, breath reduction and click/pop cleanup
 - Optional **Neural Vocal Enhance** backend using DeepFilterNet
+- **Neural Pitch + Timing** backend using pretrained CREPE pitch tracking through torchcrepe
 - Vocal → Melody / MIDI extraction
 - Optional neural AI MIDI transcription with Spotify Basic Pitch
+- **Vocal-conditioned music generation foundation** that estimates key, tempo and activity, then conditions rhythm/chords/bass/drums
 - Vocal → Music Parts: rhythm, chords, bass and drums
 - Full multi-track MIDI arrangement rendering
 - General MIDI percussion-name mapping and Channel 10 drum rendering
@@ -33,11 +35,19 @@ The project now has a crash-resistant Gradio workspace plus lightweight DSP, neu
 
 ### Neural Vocal Enhance
 
-The Neural Vocal Enhance tab uses the DeepFilterNet Python API for speech/vocal denoising. The wrapper loads a pretrained model lazily, caches it by model/device configuration, processes audio at the model's sample rate, then resamples the result back to the original sample rate. GPU is supported when a CUDA-capable PyTorch runtime is available.
+The Neural Vocal Enhance tab uses the DeepFilterNet Python API for speech/vocal denoising. The wrapper loads a pretrained model lazily, caches it by configuration, processes audio at the model's sample rate, then restores the original sample rate.
+
+### Neural Pitch + Timing
+
+The Neural Pitch + Timing tab uses pretrained CREPE pitch tracking through `torchcrepe` to obtain frame-wise F0 and periodicity. Detected pitch is converted toward the nearest semitone with conservative blockwise correction, while timing can optionally snap detected note onsets toward a BPM grid. This is an intermediate production foundation, not yet a commercial elastic-audio or frame-accurate Auto-Tune clone.
 
 ### AI MIDI
 
 The AI MIDI tab uses Spotify Basic Pitch as an optional neural audio-to-MIDI backend. It exposes MIDI tempo, frequency range, minimum note length, onset threshold and frame threshold controls, and returns MIDI note events with pitch-bend information.
+
+### Vocal-conditioned music
+
+`ai/conditioned_music.py` provides a deterministic conditioning layer: it estimates key/scale from chroma, estimates tempo from beat tracking, measures activity from onset strength, and converts those conditions into synchronized rhythm/chord/bass/drum generators. The intent is to provide a stable interface for a later learned arrangement model rather than pretending this stage is already an end-to-end generative model.
 
 Install the optional layer with:
 
@@ -47,9 +57,9 @@ pip install -r requirements-ai.txt
 
 ## Planned AI modules
 
-1. Frame-wise pitch correction and timing alignment
+1. Learned/frame-accurate vocal pitch correction and timing alignment
 2. Neural vocal restoration beyond denoising
-3. AI-conditioned Vocal → melody / rhythm / bass / drums / chords
+3. Learned Vocal → melody / rhythm / bass / drums / chords generation
 4. Stem separation refinement
 5. AI arrangement generation and full-song generation
 6. Advanced mix and mastering
@@ -59,7 +69,7 @@ pip install -r requirements-ai.txt
 
 ## Important implementation note
 
-The current melody, accompaniment, vocal-fix and mix/master modules are lightweight foundations. The neural backends are real optional model integrations, but this project is not yet equivalent to a commercial neural vocal editor, neural source separator, or AI music generator. Heavy learned models remain behind modular interfaces so stronger models can be added later.
+The current lightweight modules are foundations. The neural backends are real model integrations, but this project is not yet equivalent to a commercial neural vocal editor, neural source separator, or AI music generator. Heavy learned models remain modular so stronger models can be added later.
 
 ## Run in Google Colab
 
@@ -92,7 +102,9 @@ JE-AI-Audio-Studio/
 │   └── JE_AI_Audio_Studio.ipynb
 ├── ai/
 │   ├── basic_pitch_transcriber.py
+│   ├── conditioned_music.py
 │   ├── neural_vocal_enhancement.py
+│   ├── pitch_timing_ai.py
 │   ├── vocal_to_melody.py
 │   └── vocal_to_music.py
 ├── vocal/
