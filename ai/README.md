@@ -1,29 +1,31 @@
 # AI backends
 
-The project keeps heavyweight neural runtimes optional so the base CPU/Colab environment stays easier to install.
+The project keeps heavyweight neural runtimes optional so the base CPU environment remains easier to install.
 
-## Neural Vocal Enhance
+## Basic Pitch
 
-`neural_vocal_enhancement.py` wraps DeepFilterNet as an optional neural speech/vocal-enhancement backend. It loads the model lazily, supports automatic CPU/CUDA selection, caches initialized models, runs at the model sample rate, and restores the original input sample rate on export.
+`basic_pitch_transcriber.py` provides an optional Spotify Basic Pitch backend for neural audio-to-MIDI transcription.
 
-Install the optional AI layer:
+## DeepFilterNet
+
+`neural_vocal_enhancement.py` provides optional DeepFilterNet-based vocal/speech enhancement. The model is loaded lazily and cached by configuration.
+
+## Neural Pitch + Timing
+
+`pitch_timing_ai.py` uses pretrained CREPE through `torchcrepe` for frame-wise F0/periodicity analysis, followed by a conservative blockwise pitch correction and BPM-grid timing warp.
+
+## Conditioned music
+
+`conditioned_music.py` extracts tempo, chroma/key and onset activity from the source audio and converts those observations into synchronized rhythm, chord, bass and drum controls.
+
+## AI Conditioned Arrangement
+
+`arrangement_generator.py` combines the conditioning layer with melody extraction. In `auto` mode it tries Basic Pitch first and falls back to the existing pYIN melody extractor when the optional Basic Pitch backend is not available. The final arrangement is rendered as multi-track MIDI.
+
+This is a modular bridge toward a learned arrangement model; it is not yet an end-to-end neural full-song generator.
+
+Install the optional AI stack:
 
 ```bash
 pip install -r requirements-ai.txt
 ```
-
-Use this backend for noisy vocal or speech recordings. It is a denoiser/enhancer, not a source separator for full music mixes. Longer files can require substantial RAM/VRAM.
-
-## Basic Pitch
-
-`basic_pitch_transcriber.py` provides an optional Spotify Basic Pitch backend for neural audio-to-MIDI transcription. Basic Pitch supports polyphonic transcription and pitch-bend-aware MIDI output.
-
-Install when needed:
-
-```bash
-pip install basic-pitch
-```
-
-Use it for instrument recordings or more complex audio where the current `librosa.pyin` melody extractor is too limited. Basic Pitch works best when the input focuses on one instrument at a time.
-
-The application keeps these backends optional because their runtime dependencies can be heavy and can vary by operating system and Python runtime.
