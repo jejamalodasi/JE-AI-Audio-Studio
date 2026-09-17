@@ -98,7 +98,7 @@ The current melody, accompaniment, vocal-fix and mix/master modules are lightwei
 
 Open `colab/JE_AI_Audio_Studio.ipynb` in Colab, run the cells in order, and the notebook will clone/reset the `main` branch, install the base + optional AI dependencies, verify imports, and launch the Gradio UI with a temporary share URL.
 
-For MusicGen generation and Song Builder generation, use a GPU runtime and start with short section durations. The upstream MusicGen documentation describes Melody as text + audio conditioned generation and recommends sampling for practical generation quality. citeturn324295search0
+For MusicGen generation and Song Builder generation, use a GPU runtime and start with short section durations. The upstream MusicGen documentation describes Melody as text + audio conditioned generation and recommends sampling for practical generation quality.
 
 ## Local
 
