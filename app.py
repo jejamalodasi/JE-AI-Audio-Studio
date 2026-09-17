@@ -7,6 +7,7 @@ from typing import Optional
 import gradio as gr
 
 from ai.vocal_to_melody import MelodyConfig, vocal_to_melody
+from separation.engine import SeparationConfig, separate_stems
 from utils.audio_utils import load_audio, normalize, peak_dbfs, rms_dbfs, save_wav, trim_audio
 from vocal.analyzer import analyze_vocal
 from vocal.vocal_fix import VocalFixConfig, vocal_fix
@@ -73,8 +74,7 @@ def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
             config=MelodyConfig(fmin=fmin, fmax=fmax),
         )
         preview = notes[:20]
-        lines = [f"### 🎼 Melody extracted — {len(notes)} notes"]
-        lines.append(f"BPM: **{bpm:.0f}**")
+        lines = [f"### 🎼 Melody extracted — {len(notes)} notes", f"BPM: **{bpm:.0f}**"]
         if preview:
             lines.append("\nFirst notes:")
             lines.extend(
@@ -87,12 +87,28 @@ def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
         return None, f"❌ Melody extraction failed: {type(exc).__name__}: {exc}"
 
 
+def separate_audio(path: Optional[str], model: str, shifts: int, overlap: float):
+    if not path:
+        return [], "Please upload an audio file first."
+    try:
+        outputs = separate_stems(
+            path,
+            config=SeparationConfig(model=model, shifts=int(shifts), overlap=float(overlap)),
+        )
+        files = list(outputs.values())
+        names = ", ".join(outputs.keys())
+        return files, f"### 🧩 Separation complete\nSources: **{names}**\n\nThe files above are the exported WAV stems."
+    except Exception as exc:
+        traceback.print_exc()
+        return [], f"❌ Stem separation failed: {type(exc).__name__}: {exc}"
+
+
 def build_app():
     with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Phase 1 audio engine + Vocal Fix DSP + first Vocal→MIDI melody engine."
+            "Audio engine + Vocal Fix DSP + Vocal→MIDI + optional stem separation."
         )
 
         with gr.Tabs():
@@ -102,13 +118,8 @@ def build_app():
                         audio_in = gr.Audio(label="Input Audio", type="filepath", sources=["upload", "microphone"])
                         inspect_btn = gr.Button("🔎 Analyze Audio", variant="secondary")
                         info = gr.Markdown("Upload a file and press **Analyze Audio**.")
-
                     with gr.Column(scale=1):
-                        operation = gr.Radio(
-                            ["Vocal Fix", "Normalize", "Trim", "Pass-through"],
-                            value="Vocal Fix",
-                            label="Operation",
-                        )
+                        operation = gr.Radio(["Vocal Fix", "Normalize", "Trim", "Pass-through"], value="Vocal Fix", label="Operation")
                         nr = gr.Slider(0.0, 2.0, value=0.65, step=0.05, label="Noise Reduction Strength")
                         with gr.Row():
                             start = gr.Number(value=0, minimum=0, label="Start (seconds)")
@@ -116,16 +127,11 @@ def build_app():
                         process_btn = gr.Button("⚡ Process", variant="primary")
                         output = gr.File(label="Processed WAV")
                         status = gr.Markdown()
-
                 inspect_btn.click(inspect_audio, inputs=audio_in, outputs=info)
                 process_btn.click(process_audio, inputs=[audio_in, operation, start, end, nr], outputs=[output, status])
 
             with gr.Tab("🎼 Vocal → Melody / MIDI"):
-                melody_in = gr.Audio(
-                    label="Vocal Input",
-                    type="filepath",
-                    sources=["upload", "microphone"],
-                )
+                melody_in = gr.Audio(label="Vocal Input", type="filepath", sources=["upload", "microphone"])
                 with gr.Row():
                     bpm = gr.Slider(40, 240, value=120, step=1, label="BPM")
                     fmin = gr.Number(value=65.41, label="Minimum pitch (Hz)")
@@ -133,16 +139,23 @@ def build_app():
                 melody_btn = gr.Button("🎼 Extract Melody → MIDI", variant="primary")
                 melody_out = gr.File(label="MIDI File")
                 melody_status = gr.Markdown("Upload a mostly-monophonic vocal, then extract its melody.")
-                melody_btn.click(
-                    extract_melody,
-                    inputs=[melody_in, bpm, fmin, fmax],
-                    outputs=[melody_out, melody_status],
-                )
+                melody_btn.click(extract_melody, inputs=[melody_in, bpm, fmin, fmax], outputs=[melody_out, melody_status])
+
+            with gr.Tab("🧩 Stem Separation"):
+                stem_in = gr.Audio(label="Song / Mix Input", type="filepath", sources=["upload"])
+                with gr.Row():
+                    model = gr.Dropdown(["htdemucs", "htdemucs_ft"], value="htdemucs", label="Model")
+                    shifts = gr.Slider(0, 2, value=1, step=1, label="Quality shifts")
+                    overlap = gr.Slider(0.1, 0.75, value=0.25, step=0.05, label="Overlap")
+                separate_btn = gr.Button("🧩 Separate Stems", variant="primary")
+                stem_outputs = gr.Files(label="Separated WAV Stems")
+                stem_status = gr.Markdown("Stem separation is an optional heavy ML feature; GPU/Colab is recommended.")
+                separate_btn.click(separate_audio, inputs=[stem_in, model, shifts, overlap], outputs=[stem_outputs, stem_status])
 
         gr.Markdown(
             "---\n### 🧠 Engine roadmap\n"
-            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Vocal→Melody/MIDI foundation\n\n"
-            "Next: **ML pitch correction → de-reverb → timing correction → stem separation → rhythm/bass/drums/chords → full arrangement.**"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Vocal→Melody/MIDI · ✅ Stem separation backend\n\n"
+            "Next: **Rhythm → Bass → Drums → Chords → Full Arrangement → Mix/Master → Web/Android production UI.**"
         )
 
     return demo
