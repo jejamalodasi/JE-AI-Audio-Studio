@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from ai.conditioned_music import ConditionedMusicConfig, condition_vocal_to_music
+from music.bass_generator import BassConfig, generate_bass
+from music.chord_generator import ChordConfig, generate_chords
 from music.midi_renderer import render_arrangement_midi
 from utils.audio_utils import load_audio
 from .vocal_to_melody import MelodyConfig, vocal_to_melody
@@ -114,6 +116,17 @@ def generate_ai_conditioned_arrangement(
     bpm = float(condition["bpm"])
     key = str(cfg.key or condition["key"])
     scale = str(cfg.scale or condition["scale"])
+    bars = max(1, int(cfg.bars))
+
+    # Rebuild harmony/bass when the user explicitly overrides the detected key/scale.
+    if cfg.key is not None or cfg.scale is not None:
+        condition["chords"] = generate_chords(
+            ChordConfig(bpm=bpm, bars=bars, key=key, scale=scale)
+        )
+        condition["bass"] = generate_bass(
+            BassConfig(bpm=bpm, bars=bars, key=key, scale=scale)
+        )
+
     melody, melody_backend = _extract_melody(str(source), y, sr, cfg)
 
     if cfg.swing != 0.0:
@@ -121,7 +134,7 @@ def generate_ai_conditioned_arrangement(
         condition["rhythm"] = generate_rhythm(
             RhythmConfig(
                 bpm=bpm,
-                bars=max(1, int(cfg.bars)),
+                bars=bars,
                 density=float(condition["density"]),
                 swing=float(cfg.swing),
                 seed=int(cfg.seed),
@@ -166,6 +179,6 @@ def generate_ai_conditioned_arrangement(
         "activity": float(condition["activity"]),
         "density": float(condition["density"]),
         "condition_backend": condition["backend"],
-        "bars": max(1, int(cfg.bars)),
+        "bars": bars,
         "seed": int(cfg.seed),
     }
