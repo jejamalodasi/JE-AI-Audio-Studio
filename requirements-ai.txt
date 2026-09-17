@@ -1,3 +1,4 @@
 # Optional neural/AI layer for Colab or a dedicated server.
 # The base requirements.txt intentionally stays lightweight.
 basic-pitch==0.4.0
+deepfilternet
