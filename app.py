@@ -358,15 +358,16 @@ def build_ai_song_sketch(
     top_p: float,
     seed: int,
     continuity: str,
+    vocal_gain_db: float,
+    music_gain_db: float,
     device: str,
 ):
     if not path:
-        return None, None, "Please upload a vocal/melody reference first."
+        return None, None, None, "Please upload a vocal/melody reference first."
     try:
         selected = [str(s) for s in (selected_sections or [])]
         if not selected:
             raise ValueError("Select at least one song section.")
-
         durations = {
             "Intro": float(intro_seconds),
             "Verse": float(verse_seconds),
@@ -389,6 +390,8 @@ def build_ai_song_sketch(
             seed=int(seed),
             device=str(device),
             continuity=str(continuity),
+            vocal_gain_db=float(vocal_gain_db),
+            music_gain_db=float(music_gain_db),
             max_total_seconds=90.0,
         )
         result = build_song_sketch(path, config=cfg)
@@ -401,14 +404,15 @@ def build_ai_song_sketch(
             f"Sections: **{result['section_count']}**\n\n"
             f"Final sketch: **{result['duration_seconds']:.2f}s @ {result['sampling_rate']:,} Hz**\n\n"
             f"Continuity: **{result['continuity']}**\n\n"
+            f"Vocal gain: **{float(vocal_gain_db):.1f} dB** · Music gain: **{float(music_gain_db):.1f} dB**\n\n"
             f"Crossfade: **{float(crossfade):.2f}s**\n\n"
             f"{section_lines}\n\n"
-            "⚠️ MusicGen weights are CC-BY-NC 4.0. For commercial deployment, replace the backend with a separately licensed model."
+            "A vocal + backing preview is also rendered. ⚠️ MusicGen weights are CC-BY-NC 4.0; for commercial deployment, replace the backend with a separately licensed model."
         )
-        return result["output_path"], result["bundle_path"], status
+        return result["output_path"], result["preview_path"], result["bundle_path"], status
     except Exception as exc:
         traceback.print_exc()
-        return None, None, f"❌ AI Song Builder failed: {type(exc).__name__}: {exc}"
+        return None, None, None, f"❌ AI Song Builder failed: {type(exc).__name__}: {exc}"
 
 
 def generate_full_arrangement(
@@ -424,15 +428,7 @@ def generate_full_arrangement(
     if not path:
         return None, None, "Please upload a vocal file first."
     try:
-        cfg = VocalMusicConfig(
-            bpm=float(bpm),
-            key=str(key),
-            scale=str(scale),
-            bars=int(bars),
-            fmin=float(fmin),
-            fmax=float(fmax),
-            seed=int(seed),
-        )
+        cfg = VocalMusicConfig(bpm=float(bpm), key=str(key), scale=str(scale), bars=int(bars), fmin=float(fmin), fmax=float(fmax), seed=int(seed))
         result = generate_from_vocal(path, config=cfg)
         summary = [
             "### 🎼 Full MIDI arrangement generated",
@@ -451,24 +447,13 @@ def generate_full_arrangement(
         return None, None, f"❌ Full arrangement failed: {type(exc).__name__}: {exc}"
 
 
-def generate_music_parts(
-    path: Optional[str],
-    bpm: float,
-    key: str,
-    scale: str,
-    bars: int,
-    density: float,
-    swing: float,
-    seed: int,
-):
+def generate_music_parts(path: Optional[str], bpm: float, key: str, scale: str, bars: int, density: float, swing: float, seed: int):
     if not path:
         return None, None, None, None, "Please upload a vocal/audio file first."
     try:
         load_audio(path, mono=True)
         bpm_value, bars_value, seed_value = float(bpm), max(1, int(bars)), int(seed)
-        rhythm = generate_rhythm(
-            RhythmConfig(bpm=bpm_value, bars=bars_value, density=float(density), swing=float(swing), seed=seed_value)
-        )
+        rhythm = generate_rhythm(RhythmConfig(bpm=bpm_value, bars=bars_value, density=float(density), swing=float(swing), seed=seed_value))
         chords = generate_chords(ChordConfig(bpm=bpm_value, bars=bars_value, key=str(key), scale=str(scale)))
         bass = generate_bass(BassConfig(bpm=bpm_value, bars=bars_value, key=str(key), scale=str(scale)))
         drums = generate_drums(DrumConfig(bpm=bpm_value, bars=bars_value, density=float(density), seed=seed_value))
@@ -500,25 +485,11 @@ def mix_and_master(paths, master_gain_db: float, compression_ratio: float, satur
             raise ValueError("No valid audio files were supplied.")
         mixed_path = mix_audio_files(file_paths)
         y, sr = load_audio(mixed_path)
-        gain = 10.0 ** (float(master_gain_db) / 20.0)
-        y = y * gain
-        mastered = master_audio(
-            y,
-            MasteringConfig(
-                target_peak=float(target_peak),
-                compressor_ratio=float(compression_ratio),
-                saturation=float(saturation),
-                makeup_db=1.0,
-            ),
-        )
+        y *= 10.0 ** (float(master_gain_db) / 20.0)
+        mastered = master_audio(y, MasteringConfig(target_peak=float(target_peak), compressor_ratio=float(compression_ratio), saturation=float(saturation), makeup_db=1.0))
         out = save_wav(mastered, sr)
         stats = audio_stats(mastered)
-        return out, (
-            "### 🎚️ Mix + Master complete\n"
-            f"Tracks mixed: **{len(file_paths)}**\n\n"
-            f"Peak: **{stats['peak_dbfs']:.2f} dBFS**\n\n"
-            f"RMS: **{stats['rms_dbfs']:.2f} dBFS**"
-        )
+        return out, f"### 🎚️ Mix + Master complete\nTracks mixed: **{len(file_paths)}**\n\nPeak: **{stats['peak_dbfs']:.2f} dBFS**\n\nRMS: **{stats['rms_dbfs']:.2f} dBFS**"
     except Exception as exc:
         traceback.print_exc()
         return None, f"❌ Mix/Master failed: {type(exc).__name__}: {exc}"
@@ -528,10 +499,7 @@ def separate_audio(path: Optional[str], model: str, shifts: int, overlap: float,
     if not path:
         return [], "Please upload an audio file first."
     try:
-        outputs = separate_stems(
-            path,
-            config=SeparationConfig(model=str(model), shifts=int(shifts), overlap=float(overlap), device=str(device)),
-        )
+        outputs = separate_stems(path, config=SeparationConfig(model=str(model), shifts=int(shifts), overlap=float(overlap), device=str(device)))
         return list(outputs.values()), "### 🧩 Separation complete\n" + "\n".join(f"- {k}: `{v}`" for k, v in outputs.items())
     except Exception as exc:
         traceback.print_exc()
@@ -540,12 +508,7 @@ def separate_audio(path: Optional[str], model: str, shifts: int, overlap: float,
 
 def build_app() -> gr.Blocks:
     with gr.Blocks(title=APP_TITLE) as demo:
-        gr.Markdown(
-            "# 🎚️ JE AI Audio Studio\n"
-            "### AI-assisted vocal repair, MIDI extraction, arrangement, music generation and song sketching\n\n"
-            "A modular production playground for Colab/GPU first, with optional heavy neural backends."
-        )
-
+        gr.Markdown("# 🎚️ JE AI Audio Studio\n### AI-assisted vocal repair, MIDI extraction, arrangement, music generation and song sketching\n\nA modular production playground for Colab/GPU first, with optional heavy neural backends.")
         with gr.Tabs():
             with gr.Tab("🎚️ Audio / Vocal Fix"):
                 with gr.Row():
@@ -682,11 +645,7 @@ def build_app() -> gr.Blocks:
                 musicgen_btn.click(generate_musicgen_audio, inputs=[musicgen_in, musicgen_prompt, musicgen_duration, musicgen_guidance, musicgen_temperature, musicgen_top_k, musicgen_top_p, musicgen_seed, musicgen_device], outputs=[musicgen_out, musicgen_status])
 
             with gr.Tab("🎹 AI Song Builder"):
-                gr.Markdown(
-                    "## 🎹 Song Sketch Builder\n"
-                    "Generate a structured backing-track sketch section-by-section, then crossfade it into one timeline. "
-                    "This is a **short sketch workflow (max 90s)** for fast concepting before a full production."
-                )
+                gr.Markdown("## 🎹 Song Sketch Builder\nGenerate a structured backing-track sketch section-by-section, then crossfade it into one timeline. This is a **short sketch workflow (max 90s)** for fast concepting before a full production.")
                 song_in = gr.Audio(label="Vocal / Melody Reference", type="filepath", sources=["upload", "microphone"])
                 song_prompt = gr.Textbox(label="Base style / production prompt", lines=3, value="Bengali folk-inspired acoustic arrangement, warm harmonium, bamboo flute, hand percussion, soft bass, organic emotional production")
                 with gr.Row():
@@ -710,13 +669,16 @@ def build_app() -> gr.Blocks:
                     song_top_p = gr.Slider(0, 1, value=0, step=0.05, label="Top-p")
                 with gr.Row():
                     song_seed = gr.Number(value=42, precision=0, label="Base seed")
+                    song_vocal_gain = gr.Slider(-12, 6, value=-1, step=0.5, label="Vocal preview gain (dB)")
+                    song_music_gain = gr.Slider(-12, 6, value=-3, step=0.5, label="Music preview gain (dB)")
                     song_device = gr.Dropdown(["auto", "cpu", "cuda"], value="auto", label="Device")
                 song_btn = gr.Button("🎹 Build AI Song Sketch", variant="primary")
                 with gr.Row():
-                    song_audio_out = gr.Audio(label="Final Song Sketch", type="filepath")
+                    song_audio_out = gr.Audio(label="Final Instrumental Sketch", type="filepath")
+                    song_preview_out = gr.Audio(label="Vocal + Backing Preview", type="filepath")
                     song_bundle_out = gr.File(label="Section Bundle (.zip)")
                 song_status = gr.Markdown("Each selected section is generated independently and joined with a controlled crossfade.")
-                song_btn.click(build_ai_song_sketch, inputs=[song_in, song_prompt, song_bpm, song_key, song_scale, song_sections, song_intro, song_verse, song_chorus, song_bridge, song_outro, song_crossfade, song_guidance, song_temperature, song_top_k, song_top_p, song_seed, song_continuity, song_device], outputs=[song_audio_out, song_bundle_out, song_status])
+                song_btn.click(build_ai_song_sketch, inputs=[song_in, song_prompt, song_bpm, song_key, song_scale, song_sections, song_intro, song_verse, song_chorus, song_bridge, song_outro, song_crossfade, song_guidance, song_temperature, song_top_k, song_top_p, song_seed, song_continuity, song_vocal_gain, song_music_gain, song_device], outputs=[song_audio_out, song_preview_out, song_bundle_out, song_status])
 
             with gr.Tab("🎛️ Vocal → Music Parts"):
                 parts_in = gr.Audio(label="Vocal / Audio Input", type="filepath", sources=["upload", "microphone"])
@@ -780,13 +742,7 @@ def build_app() -> gr.Blocks:
                 stem_status = gr.Markdown("Heavy optional ML feature; GPU/Colab recommended.")
                 separate_btn.click(separate_audio, inputs=[stem_in, stem_model, stem_shifts, stem_overlap, stem_device], outputs=[stem_outputs, stem_status])
 
-        gr.Markdown(
-            "---\n"
-            "### 🧠 Roadmap\n"
-            "Current foundation: Vocal Fix DSP · Advanced Vocal Fix · DeepFilterNet · neural pitch/timing · Basic Pitch · "
-            "conditioned arrangement · MusicGen audio generation · **AI Song Builder** · MIDI arrangement · mix/master · optional stems.\n\n"
-            "Next architecture targets: true time-warping, stronger stem-aware generation, web API, and an original commercially-licensable neural rendering backend."
-        )
+        gr.Markdown("---\n### 🧠 Roadmap\nCurrent foundation: Vocal Fix DSP · Advanced Vocal Fix · DeepFilterNet · neural pitch/timing · Basic Pitch · conditioned arrangement · MusicGen audio generation · **AI Song Builder + vocal preview** · MIDI arrangement · mix/master · optional stems.\n\nNext architecture targets: true time-warping, stronger stem-aware generation, web API, and an original commercially-licensable neural rendering backend.")
     return demo
 
 
