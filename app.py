@@ -7,8 +7,9 @@ from typing import Optional
 import gradio as gr
 
 from ai.vocal_to_melody import MelodyConfig, vocal_to_melody
+from ai.vocal_to_music import VocalMusicConfig, generate_from_vocal
 from separation.engine import SeparationConfig, separate_stems
-from utils.audio_utils import load_audio, normalize, peak_dbfs, rms_dbfs, save_wav, trim_audio
+from utils.audio_utils import load_audio, normalize, save_wav, trim_audio
 from vocal.analyzer import analyze_vocal
 from vocal.vocal_fix import VocalFixConfig, vocal_fix
 
@@ -87,6 +88,46 @@ def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
         return None, f"❌ Melody extraction failed: {type(exc).__name__}: {exc}"
 
 
+def generate_full_arrangement(
+    path: Optional[str],
+    bpm: float,
+    key: str,
+    scale: str,
+    bars: int,
+    fmin: float,
+    fmax: float,
+    seed: int,
+):
+    if not path:
+        return None, None, "Please upload a vocal file first."
+    try:
+        cfg = VocalMusicConfig(
+            bpm=float(bpm),
+            key=str(key),
+            scale=str(scale),
+            bars=int(bars),
+            fmin=float(fmin),
+            fmax=float(fmax),
+            seed=int(seed),
+        )
+        result = generate_from_vocal(path, config=cfg)
+        summary = [
+            "### 🎼 Full MIDI arrangement generated",
+            f"BPM: **{cfg.bpm:.0f}**",
+            f"Key: **{cfg.key} {cfg.scale}**",
+            f"Bars: **{cfg.bars}**",
+            f"Melody notes: **{len(result['melody'])}**",
+            f"Chords: **{len(result['chords'])}**",
+            f"Bass events: **{len(result['bass'])}**",
+            f"Drum events: **{len(result['drums'])}**",
+            f"Rhythm events: **{len(result['rhythm']['events'])}**",
+        ]
+        return result["arrangement_midi_path"], result["midi_path"], "\n\n".join(summary)
+    except Exception as exc:
+        traceback.print_exc()
+        return None, None, f"❌ Full arrangement failed: {type(exc).__name__}: {exc}"
+
+
 def separate_audio(path: Optional[str], model: str, shifts: int, overlap: float):
     if not path:
         return [], "Please upload an audio file first."
@@ -108,7 +149,7 @@ def build_app():
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Audio engine + Vocal Fix DSP + Vocal→MIDI + optional stem separation."
+            "Audio engine + Vocal Fix DSP + Vocal→MIDI + Full Arrangement + optional stem separation."
         )
 
         with gr.Tabs():
@@ -141,6 +182,33 @@ def build_app():
                 melody_status = gr.Markdown("Upload a mostly-monophonic vocal, then extract its melody.")
                 melody_btn.click(extract_melody, inputs=[melody_in, bpm, fmin, fmax], outputs=[melody_out, melody_status])
 
+            with gr.Tab("🎼 Vocal → Full Arrangement"):
+                arrange_in = gr.Audio(label="Vocal Input", type="filepath", sources=["upload", "microphone"])
+                with gr.Row():
+                    arrange_bpm = gr.Slider(40, 240, value=120, step=1, label="BPM")
+                    arrange_key = gr.Dropdown(
+                        ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
+                        value="C",
+                        label="Key",
+                    )
+                    arrange_scale = gr.Dropdown(["major", "minor"], value="major", label="Scale")
+                with gr.Row():
+                    arrange_bars = gr.Slider(1, 64, value=4, step=1, label="Bars")
+                    arrange_fmin = gr.Number(value=65.41, label="Minimum pitch (Hz)")
+                    arrange_fmax = gr.Number(value=1046.50, label="Maximum pitch (Hz)")
+                    arrange_seed = gr.Number(value=42, precision=0, label="Seed")
+                arrange_btn = gr.Button("🎼 Generate Full Arrangement", variant="primary")
+                arrangement_out = gr.File(label="Full Arrangement MIDI")
+                melody_arrangement_out = gr.File(label="Melody-only MIDI")
+                arrangement_status = gr.Markdown(
+                    "Generates melody + rhythm + chords + bass + drums as one synchronized MIDI arrangement."
+                )
+                arrange_btn.click(
+                    generate_full_arrangement,
+                    inputs=[arrange_in, arrange_bpm, arrange_key, arrange_scale, arrange_bars, arrange_fmin, arrange_fmax, arrange_seed],
+                    outputs=[arrangement_out, melody_arrangement_out, arrangement_status],
+                )
+
             with gr.Tab("🧩 Stem Separation"):
                 stem_in = gr.Audio(label="Song / Mix Input", type="filepath", sources=["upload"])
                 with gr.Row():
@@ -154,8 +222,8 @@ def build_app():
 
         gr.Markdown(
             "---\n### 🧠 Engine roadmap\n"
-            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Vocal→Melody/MIDI · ✅ Stem separation backend\n\n"
-            "Next: **Rhythm → Bass → Drums → Chords → Full Arrangement → Mix/Master → Web/Android production UI.**"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Vocal→Melody/MIDI · ✅ Stem separation backend · ✅ Full MIDI Arrangement\n\n"
+            "Next: **Vocal→Rhythm/Bass/Drums/Chords controls → Mix/Master → Web/Android production UI.**"
         )
 
     return demo
