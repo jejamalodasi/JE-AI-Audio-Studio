@@ -6,7 +6,7 @@ AI-assisted audio editing and music production toolkit by **JE Jamal Odasi**.
 
 ## Current milestone
 
-The project now has a crash-resistant Gradio workspace plus lightweight DSP, neural analysis, neural transcription and optional neural vocal-enhancement foundations:
+The project now has a crash-resistant Gradio workspace plus lightweight DSP, neural analysis, neural transcription, conditioned arrangement and optional neural audio-generation foundations:
 
 - Upload WAV / MP3 / FLAC / OGG / M4A when the runtime supports decoding
 - Audio inspection: duration, sample rate, channels, peak and RMS
@@ -20,6 +20,7 @@ The project now has a crash-resistant Gradio workspace plus lightweight DSP, neu
 - Vocal → Melody / MIDI extraction
 - Optional neural AI MIDI transcription with Spotify Basic Pitch
 - **AI Conditioned Arrangement**: vocal-conditioned tempo/key/activity → melody + rhythm + chords + bass + drums
+- **AI Music Generator**: optional MusicGen Melody text + audio-conditioned short music synthesis
 - Vocal → Music Parts: rhythm, chords, bass and drums
 - Full multi-track MIDI arrangement rendering
 - General MIDI percussion-name mapping and Channel 10 drum rendering
@@ -47,12 +48,13 @@ The AI MIDI tab uses Spotify Basic Pitch as an optional neural audio-to-MIDI bac
 
 ### AI Conditioned Arrangement
 
-The arrangement pipeline combines two stages:
+The arrangement pipeline analyzes source tempo, chroma/key and onset activity, then feeds those conditions into synchronized accompaniment generators. Basic Pitch is used when available for melody extraction, with pYIN fallback. This remains a modular conditioning pipeline rather than an end-to-end learned song model.
 
-1. Analyze the source vocal/audio for tempo, chroma/key and onset activity.
-2. Feed those conditions into synchronized rhythm/chord/bass/drum generators and use Basic Pitch when available for the melody, with a pYIN fallback.
+### AI Music Generator
 
-This is a modular conditioning pipeline, but it is **not yet an end-to-end learned full-song generator**. The architecture is intentionally designed so a learned arrangement/audio model can replace the current generator stage later.
+The optional MusicGen Melody backend uses the Hugging Face Transformers implementation of `facebook/musicgen-melody` to generate short music from a text description plus an audio/melody reference. The current UI exposes generation duration, guidance scale, temperature, top-k, top-p and device controls.
+
+**Licensing:** Meta's MusicGen model card states that the model weights are released under **CC-BY-NC 4.0**. Treat the bundled MusicGen backend as research/non-commercial unless you substitute a separately licensed model behind the same interface.
 
 Install the optional layer with:
 
@@ -66,7 +68,7 @@ pip install -r requirements-ai.txt
 2. Neural vocal restoration beyond denoising
 3. Learned Vocal → melody / rhythm / bass / drums / chords generation
 4. Learned style/genre-conditioned arrangement generation
-5. Neural audio rendering / full-song synthesis
+5. Commercially licensable neural audio rendering / full-song synthesis
 6. Stem separation refinement
 7. Advanced mix and mastering
 8. WAV / MP3 / MIDI export pipeline
@@ -75,11 +77,13 @@ pip install -r requirements-ai.txt
 
 ## Important implementation note
 
-The current melody, accompaniment, vocal-fix and mix/master modules are lightweight foundations. The neural backends are real optional model integrations, but this project is not yet equivalent to a commercial neural vocal editor, neural source separator, or end-to-end AI music generator. Heavy learned models remain behind modular interfaces so stronger models can be added later.
+The current melody, accompaniment, vocal-fix and mix/master modules are lightweight foundations. The neural backends are real optional model integrations, but this project is not yet equivalent to a commercial neural vocal editor, neural source separator, or end-to-end AI music generator. Heavy learned models remain behind modular interfaces so stronger or differently licensed models can be added later.
 
 ## Run in Google Colab
 
 Open `colab/JE_AI_Audio_Studio.ipynb` in Colab, run the cells in order, and the notebook will clone/reset the `main` branch, install the base + optional AI dependencies, verify imports, and launch the Gradio UI with a temporary share URL.
+
+For MusicGen generation, use a GPU runtime and start with short durations. The upstream documentation notes that larger MusicGen variants require substantial GPU memory; the small melody model is the intended prototype starting point here.
 
 ## Local
 
@@ -110,6 +114,7 @@ JE-AI-Audio-Studio/
 │   ├── arrangement_generator.py
 │   ├── basic_pitch_transcriber.py
 │   ├── conditioned_music.py
+│   ├── musicgen_melody.py
 │   ├── neural_vocal_enhancement.py
 │   ├── pitch_timing_ai.py
 │   ├── vocal_to_melody.py
