@@ -15,11 +15,18 @@ def _clamp_note(note: int | float) -> int:
     return max(NOTE_MIN, min(NOTE_MAX, int(round(note))))
 
 
-def _add_note_events(events: list[tuple[float, str, int, int]], start: float, duration: float, note: int | float, velocity: int = 90) -> None:
+def _clamp_velocity(value: int | float) -> int:
+    value = float(value)
+    if 0.0 <= value <= 1.0:
+        value *= 127.0
+    return max(1, min(127, int(round(value))))
+
+
+def _add_note_events(events: list[tuple[float, str, int, int]], start: float, duration: float, note: int | float, velocity: int | float = 90) -> None:
     start = max(0.0, float(start))
     duration = max(0.01, float(duration))
     n = _clamp_note(note)
-    v = max(1, min(127, int(velocity)))
+    v = _clamp_velocity(velocity)
     events.append((start, "on", n, v))
     events.append((start + duration, "off", n, 0))
 
@@ -90,15 +97,13 @@ def render_arrangement_midi(
 
     drum_events: list[tuple[float, str, int, int]] = []
     for item in drums or []:
-        # Drum generators may expose the instrument as `drum`, `instrument`,
-        # `note`, or `midi`. Resolve names such as kick/snare/hat to GM notes.
         raw_note = item.get("drum", item.get("instrument", item.get("note", item.get("midi", 36))))
         _add_note_events(
             drum_events,
             item.get("start", item.get("time", 0.0)),
             item.get("duration", 0.08),
             resolve_drum_note(raw_note),
-            int(float(item.get("velocity", 100)) * 127) if 0.0 <= float(item.get("velocity", 100)) <= 1.0 else item.get("velocity", 100),
+            item.get("velocity", 100),
         )
 
     rhythm_events: list[tuple[float, str, int, int]] = []
@@ -109,7 +114,7 @@ def render_arrangement_midi(
                 item.get("time", 0.0),
                 rhythm.get("step_seconds", 0.125) * 0.75,
                 42,
-                int(float(item.get("velocity", 0.65)) * 127),
+                item.get("velocity", 96),
             )
 
     add_track("Melody", 0, melody_events)
