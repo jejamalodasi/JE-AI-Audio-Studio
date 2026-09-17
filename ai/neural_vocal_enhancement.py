@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 
-_MODEL_CACHE: dict[tuple[str, str], tuple[Any, Any, str]] = {}
+_MODEL_CACHE: dict[tuple[str, str, bool], tuple[Any, Any, str]] = {}
 
 
 def _device_name(requested: str) -> str:
@@ -20,8 +20,8 @@ def _device_name(requested: str) -> str:
         return "cpu"
 
 
-def _init_model(model_name: str, device: str):
-    cache_key = (str(model_name), str(device))
+def _init_model(model_name: str, device: str, post_filter: bool):
+    cache_key = (str(model_name), str(device), bool(post_filter))
     if cache_key in _MODEL_CACHE:
         return _MODEL_CACHE[cache_key]
 
@@ -38,7 +38,11 @@ def _init_model(model_name: str, device: str):
         raise RuntimeError("CUDA was requested, but no CUDA-capable PyTorch device is available.")
 
     try:
-        initialized = init_df(default_model=str(model_name), config_allow_defaults=True)
+        initialized = init_df(
+            default_model=str(model_name),
+            post_filter=bool(post_filter),
+            config_allow_defaults=True,
+        )
     except TypeError:
         initialized = init_df(str(model_name), config_allow_defaults=True)
 
@@ -62,9 +66,9 @@ def enhance_vocal_neural(
 ) -> dict[str, Any]:
     """Enhance noisy vocal/speech audio with optional DeepFilterNet inference.
 
-    The model is loaded lazily and cached per model/device pair. Input audio is
-    resampled internally to the model sample rate and returned to its original
-    sample rate for predictable integration with the rest of the studio.
+    The model is loaded lazily and cached per model/device/post-filter setting.
+    Input audio is resampled internally to the model sample rate and returned to
+    its original sample rate for predictable integration with the studio.
     """
     if not audio_path:
         raise ValueError("audio_path is required")
@@ -73,10 +77,9 @@ def enhance_vocal_neural(
         raise FileNotFoundError(str(source))
 
     selected_device = _device_name(device)
-    model, df_state, suffix = _init_model(model_name, selected_device)
+    model, df_state, suffix = _init_model(model_name, selected_device, post_filter)
 
     try:
-        import numpy as np
         import torch
         from df.enhance import enhance, load_audio, save_audio
         from df.io import resample
@@ -85,7 +88,6 @@ def enhance_vocal_neural(
             "DeepFilterNet runtime dependencies are incomplete. Reinstall requirements-ai.txt."
         ) from exc
 
-    # Use the project's normal decoder only to discover the original sample rate.
     from utils.audio_utils import load_audio as studio_load_audio
 
     _, original_sr = studio_load_audio(str(source), mono=False)
@@ -99,19 +101,7 @@ def enhance_vocal_neural(
     if atten is not None and atten < 0:
         raise ValueError("atten_lim_db must be >= 0 or None")
 
-    try:
-        enhanced = enhance(
-            model,
-            df_state,
-            audio,
-            pad=True,
-            atten_lim_db=atten,
-            post_filter=bool(post_filter),
-        )
-    except TypeError:
-        # Compatibility with versions where post_filter is configured only at init.
-        enhanced = enhance(model, df_state, audio, pad=True, atten_lim_db=atten)
-
+    enhanced = enhance(model, df_state, audio, pad=True, atten_lim_db=atten)
     enhanced = enhanced.to("cpu") if hasattr(enhanced, "to") else torch.as_tensor(enhanced)
     enhanced = resample(enhanced, df_state.sr(), int(original_sr))
 
