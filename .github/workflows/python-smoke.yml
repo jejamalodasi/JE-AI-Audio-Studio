@@ -31,13 +31,16 @@ jobs:
           from app import build_app
           from ai.arrangement_generator import generate_ai_conditioned_arrangement
           from ai.conditioned_music import condition_vocal_to_music
+          from ai.musicgen_melody import MusicGenConfig
           from ai.pitch_timing_ai import correct_pitch_timing_ai
           print("✅ app import")
           print("✅ conditioned music import")
           print("✅ arrangement import")
           print("✅ pitch/timing import")
+          print("✅ MusicGen backend import")
           print("✅ build_app symbol:", callable(build_app))
           print("✅ arrangement symbol:", callable(generate_ai_conditioned_arrangement))
           print("✅ conditioning symbol:", callable(condition_vocal_to_music))
           print("✅ pitch/timing symbol:", callable(correct_pitch_timing_ai))
+          print("✅ MusicGen config:", MusicGenConfig())
           PY
