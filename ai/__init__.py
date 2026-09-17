@@ -11,6 +11,7 @@ from .pitch_timing_ai import (
     correct_pitch_timing_ai,
     correct_pitch_timing_file,
 )
+from .song_builder import SongBuilderConfig, SongSection, build_song_sketch
 from .vocal_to_melody import vocal_to_melody
 from .vocal_to_music import VocalMusicConfig, generate_from_vocal
 
@@ -27,6 +28,9 @@ __all__ = [
     "analyze_pitch_neural",
     "correct_pitch_timing_ai",
     "correct_pitch_timing_file",
+    "SongBuilderConfig",
+    "SongSection",
+    "build_song_sketch",
     "vocal_to_melody",
     "VocalMusicConfig",
     "generate_from_vocal",
