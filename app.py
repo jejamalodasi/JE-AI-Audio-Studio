@@ -8,6 +8,7 @@ import gradio as gr
 
 from ai.basic_pitch_transcriber import transcribe_with_basic_pitch
 from ai.neural_vocal_enhancement import enhance_vocal_neural
+from ai.pitch_timing_ai import PitchTimingAIConfig, correct_pitch_timing_ai
 from ai.vocal_to_melody import MelodyConfig, vocal_to_melody
 from ai.vocal_to_music import VocalMusicConfig, generate_from_vocal
 from mixing.loudness import audio_stats
@@ -26,7 +27,6 @@ from vocal.vocal_fix_advanced import AdvancedVocalFixConfig, advanced_vocal_fix
 
 
 APP_TITLE = "JE AI Audio Studio"
-
 KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 SCALES = ["major", "minor"]
 
@@ -74,15 +74,7 @@ def process_audio(path: Optional[str], operation: str, start: float, end: float,
         return None, f"❌ {type(exc).__name__}: {exc}"
 
 
-def process_advanced_vocal(
-    path: Optional[str],
-    noise_reduction: float,
-    dereverb_strength: float,
-    pitch_strength: float,
-    timing_strength: float,
-    breath_reduction: float,
-    click_cleanup: bool,
-):
+def process_advanced_vocal(path: Optional[str], noise_reduction: float, dereverb_strength: float, pitch_strength: float, timing_strength: float, breath_reduction: float, click_cleanup: bool):
     if not path:
         return None, "Please upload a vocal file first."
     try:
@@ -110,13 +102,7 @@ def process_advanced_vocal(
         return None, f"❌ Advanced Vocal Fix failed: {type(exc).__name__}: {exc}"
 
 
-def enhance_vocal_with_ai(
-    path: Optional[str],
-    model_name: str,
-    device: str,
-    atten_lim_db: float,
-    post_filter: bool,
-):
+def enhance_vocal_with_ai(path: Optional[str], model_name: str, device: str, atten_lim_db: float, post_filter: bool):
     if not path:
         return None, "Please upload a vocal/audio file first."
     try:
@@ -140,6 +126,39 @@ def enhance_vocal_with_ai(
         return None, f"❌ Neural Vocal Enhance failed: {type(exc).__name__}: {exc}"
 
 
+def correct_pitch_timing_with_ai(path: Optional[str], fmin: float, fmax: float, model: str, device: str, periodicity: float, pitch_strength: float, max_semitones: float, block_ms: float, timing_strength: float, bpm: float, max_timing_shift_ms: float):
+    if not path:
+        return None, "Please upload a vocal file first."
+    try:
+        y, sr = load_audio(path)
+        cfg = PitchTimingAIConfig(
+            fmin=float(fmin),
+            fmax=float(fmax),
+            model=str(model),
+            periodicity_threshold=float(periodicity),
+            correction_strength=float(pitch_strength),
+            max_semitones=float(max_semitones),
+            block_ms=float(block_ms),
+            timing_strength=float(timing_strength),
+            bpm=float(bpm),
+            max_timing_shift_ms=float(max_timing_shift_ms),
+        )
+        corrected, report = correct_pitch_timing_ai(y, sr, cfg, device=str(device))
+        out = save_wav(corrected, sr)
+        return out, (
+            "### 🎯 Neural Pitch + Timing complete\n"
+            f"Backend: **Torch-CREPE / torchcrepe**\n\n"
+            f"Device: **{report['device']}**\n\n"
+            f"Voiced frames: **{report['voiced_frames']}**\n\n"
+            f"Detected note onsets: **{len(report['note_onsets'])}**\n\n"
+            f"Pitch correction: **{float(pitch_strength):.2f}** · Timing correction: **{float(timing_strength):.2f}**\n\n"
+            "Correction is deliberately conservative; this is not a commercial frame-accurate Auto-Tune/elastic-audio engine yet."
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        return None, f"❌ Neural Pitch/Timing failed: {type(exc).__name__}: {exc}"
+
+
 def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
     if not path:
         return None, "Please upload a vocal file first."
@@ -147,37 +166,19 @@ def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
         y, sr = load_audio(path)
         with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
             midi_path = tmp.name
-        midi_path, notes = vocal_to_melody(
-            y,
-            sr,
-            output_path=midi_path,
-            bpm=bpm,
-            config=MelodyConfig(fmin=fmin, fmax=fmax),
-        )
+        midi_path, notes = vocal_to_melody(y, sr, output_path=midi_path, bpm=bpm, config=MelodyConfig(fmin=fmin, fmax=fmax))
         preview = notes[:20]
         lines = [f"### 🎼 Melody extracted — {len(notes)} notes", f"BPM: **{bpm:.0f}**"]
         if preview:
             lines.append("\nFirst notes:")
-            lines.extend(
-                f"- MIDI **{n['note']}** · {n['start']:.2f}s · {n['duration']:.2f}s"
-                for n in preview
-            )
+            lines.extend(f"- MIDI **{n['note']}** · {n['start']:.2f}s · {n['duration']:.2f}s" for n in preview)
         return midi_path, "\n".join(lines)
     except Exception as exc:
         traceback.print_exc()
         return None, f"❌ Melody extraction failed: {type(exc).__name__}: {exc}"
 
 
-def transcribe_ai_midi(
-    path: Optional[str],
-    min_freq: float,
-    max_freq: float,
-    min_note_ms: float,
-    onset: float,
-    frame: float,
-    bpm: float,
-):
-    """Run the optional neural Basic Pitch backend and return a MIDI file."""
+def transcribe_ai_midi(path: Optional[str], min_freq: float, max_freq: float, min_note_ms: float, onset: float, frame: float, bpm: float):
     if not path:
         return None, "Please upload an audio file first."
     try:
@@ -191,46 +192,21 @@ def transcribe_ai_midi(
             midi_tempo=float(bpm),
         )
         preview = result["notes"][:12]
-        lines = [
-            "### 🧠 AI MIDI complete",
-            "Backend: **Spotify Basic Pitch**",
-            f"Notes detected: **{result['note_count']}**",
-            f"MIDI tempo: **{float(bpm):.0f} BPM**",
-        ]
+        lines = ["### 🧠 AI MIDI complete", "Backend: **Spotify Basic Pitch**", f"Notes detected: **{result['note_count']}**", f"MIDI tempo: **{float(bpm):.0f} BPM**"]
         if preview:
             lines.append("\nFirst detected notes:")
-            lines.extend(
-                f"- MIDI **{n['note']}** · {n['start']:.2f}s → {n['end']:.2f}s · velocity {n['velocity']:.2f}"
-                for n in preview
-            )
+            lines.extend(f"- MIDI **{n['note']}** · {n['start']:.2f}s → {n['end']:.2f}s · velocity {n['velocity']:.2f}" for n in preview)
         return result["midi_path"], "\n\n".join(lines)
     except Exception as exc:
         traceback.print_exc()
         return None, f"❌ AI MIDI failed: {type(exc).__name__}: {exc}"
 
 
-def generate_full_arrangement(
-    path: Optional[str],
-    bpm: float,
-    key: str,
-    scale: str,
-    bars: int,
-    fmin: float,
-    fmax: float,
-    seed: int,
-):
+def generate_full_arrangement(path: Optional[str], bpm: float, key: str, scale: str, bars: int, fmin: float, fmax: float, seed: int):
     if not path:
         return None, None, "Please upload a vocal file first."
     try:
-        cfg = VocalMusicConfig(
-            bpm=float(bpm),
-            key=str(key),
-            scale=str(scale),
-            bars=int(bars),
-            fmin=float(fmin),
-            fmax=float(fmax),
-            seed=int(seed),
-        )
+        cfg = VocalMusicConfig(bpm=float(bpm), key=str(key), scale=str(scale), bars=int(bars), fmin=float(fmin), fmax=float(fmax), seed=int(seed))
         result = generate_from_vocal(path, config=cfg)
         summary = [
             "### 🎼 Full MIDI arrangement generated",
@@ -249,41 +225,19 @@ def generate_full_arrangement(
         return None, None, f"❌ Full arrangement failed: {type(exc).__name__}: {exc}"
 
 
-def generate_music_parts(
-    path: Optional[str],
-    bpm: float,
-    key: str,
-    scale: str,
-    bars: int,
-    density: float,
-    swing: float,
-    seed: int,
-):
-    """Generate separate MIDI files for rhythm, chords, bass, and drums."""
+def generate_music_parts(path: Optional[str], bpm: float, key: str, scale: str, bars: int, density: float, swing: float, seed: int):
     if not path:
         return None, None, None, None, "Please upload a vocal/audio file first."
     try:
         load_audio(path, mono=True)
-        bpm = float(bpm)
-        bars = max(1, int(bars))
-        seed = int(seed)
-
-        rhythm = generate_rhythm(
-            RhythmConfig(
-                bpm=bpm,
-                bars=bars,
-                density=float(density),
-                swing=float(swing),
-                seed=seed,
-            )
-        )
+        bpm, bars, seed = float(bpm), max(1, int(bars)), int(seed)
+        rhythm = generate_rhythm(RhythmConfig(bpm=bpm, bars=bars, density=float(density), swing=float(swing), seed=seed))
         chords = generate_chords(ChordConfig(bpm=bpm, bars=bars, key=str(key), scale=str(scale)))
         bass = generate_bass(BassConfig(bpm=bpm, bars=bars, key=str(key), scale=str(scale)))
         drums = generate_drums(DrumConfig(bpm=bpm, bars=bars, density=float(density), seed=seed))
 
         def temp_midi(label: str) -> str:
-            safe = label.lower().replace(" ", "_")
-            handle = tempfile.NamedTemporaryFile(suffix=f"_{safe}.mid", delete=False)
+            handle = tempfile.NamedTemporaryFile(suffix=f"_{label.lower().replace(' ', '_')}.mid", delete=False)
             handle.close()
             return handle.name
 
@@ -291,7 +245,6 @@ def generate_music_parts(
         chord_path = render_arrangement_midi(None, None, chords, None, None, temp_midi("chords"), bpm=bpm)
         bass_path = render_arrangement_midi(None, None, None, bass, None, temp_midi("bass"), bpm=bpm)
         drum_path = render_arrangement_midi(None, None, None, None, drums, temp_midi("drums"), bpm=bpm)
-
         status = (
             "### 🎛️ Music parts generated\n"
             f"BPM: **{bpm:.0f}** · Key: **{key} {scale}** · Bars: **{bars}**\n\n"
@@ -308,7 +261,6 @@ def generate_music_parts(
 
 
 def mix_and_master(paths, master_gain_db: float, compression_ratio: float, saturation: float, target_peak: float):
-    """Mix uploaded stems and run the lightweight master bus."""
     if not paths:
         return None, "Please upload at least one audio file."
     try:
@@ -316,27 +268,13 @@ def mix_and_master(paths, master_gain_db: float, compression_ratio: float, satur
         file_paths = [str(p) for p in file_paths if p]
         if not file_paths:
             return None, "Please upload at least one audio file."
-
         mixed_path = mix_audio_files(file_paths)
         mixed, sr = load_audio(mixed_path)
-        gain = 10.0 ** (float(master_gain_db) / 20.0)
-        mixed = mixed * gain
-        cfg = MasteringConfig(
-            target_peak=float(target_peak),
-            compressor_ratio=float(compression_ratio),
-            saturation=float(saturation),
-        )
-        mastered = master_audio(mixed, cfg)
+        mixed = mixed * (10.0 ** (float(master_gain_db) / 20.0))
+        mastered = master_audio(mixed, MasteringConfig(target_peak=float(target_peak), compressor_ratio=float(compression_ratio), saturation=float(saturation)))
         out = save_wav(mastered, sr)
         stats = audio_stats(mastered)
-        return out, (
-            "### 🎚️ Mix & Master complete\n"
-            f"Tracks mixed: **{len(file_paths)}**\n\n"
-            f"Sample rate: **{sr:,} Hz**\n\n"
-            f"Peak: **{stats['peak_dbfs']:.2f} dBFS**\n\n"
-            f"RMS: **{stats['rms_dbfs']:.2f} dBFS**\n\n"
-            f"Crest: **{stats['crest_db']:.2f} dB**"
-        )
+        return out, f"### 🎚️ Mix & Master complete\nTracks mixed: **{len(file_paths)}**\n\nSample rate: **{sr:,} Hz**\n\nPeak: **{stats['peak_dbfs']:.2f} dBFS**\n\nRMS: **{stats['rms_dbfs']:.2f} dBFS**\n\nCrest: **{stats['crest_db']:.2f} dB**"
     except Exception as exc:
         traceback.print_exc()
         return None, f"❌ Mix/Master failed: {type(exc).__name__}: {exc}"
@@ -346,13 +284,8 @@ def separate_audio(path: Optional[str], model: str, shifts: int, overlap: float)
     if not path:
         return [], "Please upload an audio file first."
     try:
-        outputs = separate_stems(
-            path,
-            config=SeparationConfig(model=model, shifts=int(shifts), overlap=float(overlap)),
-        )
-        files = list(outputs.values())
-        names = ", ".join(outputs.keys())
-        return files, f"### 🧩 Separation complete\nSources: **{names}**\n\nThe files above are the exported WAV stems."
+        outputs = separate_stems(path, config=SeparationConfig(model=model, shifts=int(shifts), overlap=float(overlap)))
+        return list(outputs.values()), f"### 🧩 Separation complete\nSources: **{', '.join(outputs.keys())}**\n\nThe files above are the exported WAV stems."
     except Exception as exc:
         traceback.print_exc()
         return [], f"❌ Stem separation failed: {type(exc).__name__}: {exc}"
@@ -363,9 +296,8 @@ def build_app():
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Neural Vocal Enhance + AI MIDI + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
+            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Neural Vocal Enhance + Neural Pitch/Timing + AI MIDI + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
         )
-
         with gr.Tabs():
             with gr.Tab("🎚️ Audio / Vocal Fix"):
                 with gr.Row():
@@ -397,14 +329,8 @@ def build_app():
                     advanced_click = gr.Checkbox(value=True, label="Click / Pop Cleanup")
                 advanced_btn = gr.Button("🧪 Run Advanced Vocal Fix", variant="primary")
                 advanced_out = gr.File(label="Advanced Fixed WAV")
-                advanced_status = gr.Markdown(
-                    "Use small pitch/timing values first. The current pitch/timing modules are conservative DSP foundations, not frame-wise commercial Auto-Tune."
-                )
-                advanced_btn.click(
-                    process_advanced_vocal,
-                    inputs=[advanced_in, advanced_nr, advanced_dereverb, advanced_pitch, advanced_timing, advanced_breath, advanced_click],
-                    outputs=[advanced_out, advanced_status],
-                )
+                advanced_status = gr.Markdown("Use small pitch/timing values first. The existing Advanced Vocal Fix path is a conservative DSP foundation.")
+                advanced_btn.click(process_advanced_vocal, inputs=[advanced_in, advanced_nr, advanced_dereverb, advanced_pitch, advanced_timing, advanced_breath, advanced_click], outputs=[advanced_out, advanced_status])
 
             with gr.Tab("🧠 Neural Vocal Enhance"):
                 neural_in = gr.Audio(label="Vocal / Speech Input", type="filepath", sources=["upload", "microphone"])
@@ -416,14 +342,29 @@ def build_app():
                     neural_post = gr.Checkbox(value=False, label="Post-filter")
                 neural_btn = gr.Button("🧠 Enhance Vocal with Neural AI", variant="primary")
                 neural_out = gr.File(label="Neural Enhanced WAV")
-                neural_status = gr.Markdown(
-                    "Optional DeepFilterNet backend. It is intended for noisy vocal/speech enhancement; it is not a music-source separator. GPU/Colab is recommended for longer files."
-                )
-                neural_btn.click(
-                    enhance_vocal_with_ai,
-                    inputs=[neural_in, neural_model, neural_device, neural_atten, neural_post],
-                    outputs=[neural_out, neural_status],
-                )
+                neural_status = gr.Markdown("Optional DeepFilterNet backend for noisy vocal/speech enhancement. GPU/Colab is recommended for longer files.")
+                neural_btn.click(enhance_vocal_with_ai, inputs=[neural_in, neural_model, neural_device, neural_atten, neural_post], outputs=[neural_out, neural_status])
+
+            with gr.Tab("🎯 Neural Pitch + Timing"):
+                pt_in = gr.Audio(label="Vocal Input", type="filepath", sources=["upload", "microphone"])
+                with gr.Row():
+                    pt_fmin = gr.Number(value=65.0, minimum=20, maximum=2000, label="Minimum F0 (Hz)")
+                    pt_fmax = gr.Number(value=1100.0, minimum=100, maximum=3000, label="Maximum F0 (Hz)")
+                    pt_model = gr.Dropdown(["tiny", "full"], value="full", label="CREPE model")
+                    pt_device = gr.Dropdown(["auto", "cpu", "cuda"], value="auto", label="Device")
+                with gr.Row():
+                    pt_periodicity = gr.Slider(0.05, 0.9, value=0.25, step=0.05, label="Voicing confidence")
+                    pt_pitch = gr.Slider(0.0, 1.0, value=0.65, step=0.05, label="Pitch correction strength")
+                    pt_max_semitones = gr.Slider(0.25, 4.0, value=2.0, step=0.25, label="Max pitch move (semitones)")
+                with gr.Row():
+                    pt_block = gr.Slider(80, 300, value=160, step=10, label="Pitch block (ms)")
+                    pt_timing = gr.Slider(0.0, 1.0, value=0.0, step=0.05, label="Timing correction strength")
+                    pt_bpm = gr.Slider(40, 240, value=120, step=1, label="Timing grid BPM")
+                    pt_max_shift = gr.Slider(10, 150, value=70, step=5, label="Max timing shift (ms)")
+                pt_btn = gr.Button("🎯 Run Neural Pitch + Timing", variant="primary")
+                pt_out = gr.File(label="Corrected Vocal WAV")
+                pt_status = gr.Markdown("Uses pretrained CREPE pitch tracking through torchcrepe. Start with modest correction strength; the current correction stage is a conservative blockwise processor.")
+                pt_btn.click(correct_pitch_timing_with_ai, inputs=[pt_in, pt_fmin, pt_fmax, pt_model, pt_device, pt_periodicity, pt_pitch, pt_max_semitones, pt_block, pt_timing, pt_bpm, pt_max_shift], outputs=[pt_out, pt_status])
 
             with gr.Tab("🎼 Vocal → Melody / MIDI"):
                 melody_in = gr.Audio(label="Vocal Input", type="filepath", sources=["upload", "microphone"])
@@ -448,14 +389,8 @@ def build_app():
                     ai_frame = gr.Slider(0.05, 0.95, value=0.30, step=0.05, label="Frame threshold")
                 ai_midi_btn = gr.Button("🧠 Transcribe with AI → MIDI", variant="primary")
                 ai_midi_out = gr.File(label="AI MIDI File")
-                ai_midi_status = gr.Markdown(
-                    "Optional neural backend. Install **basic-pitch** in Colab/server before running this tab. It can expose pitch-bend-aware MIDI note events."
-                )
-                ai_midi_btn.click(
-                    transcribe_ai_midi,
-                    inputs=[ai_midi_in, ai_min_freq, ai_max_freq, ai_min_note, ai_onset, ai_frame, ai_midi_bpm],
-                    outputs=[ai_midi_out, ai_midi_status],
-                )
+                ai_midi_status = gr.Markdown("Optional neural backend. Install the AI requirements in Colab/server before running this tab.")
+                ai_midi_btn.click(transcribe_ai_midi, inputs=[ai_midi_in, ai_min_freq, ai_max_freq, ai_min_note, ai_onset, ai_frame, ai_midi_bpm], outputs=[ai_midi_out, ai_midi_status])
 
             with gr.Tab("🎛️ Vocal → Music Parts"):
                 parts_in = gr.Audio(label="Vocal / Audio Input", type="filepath", sources=["upload", "microphone"])
@@ -476,11 +411,7 @@ def build_app():
                     bass_out = gr.File(label="Bass MIDI")
                     drum_out = gr.File(label="Drums MIDI")
                 parts_status = gr.Markdown("Generates synchronized rhythm, chord, bass and GM-drum MIDI building blocks.")
-                parts_btn.click(
-                    generate_music_parts,
-                    inputs=[parts_in, parts_bpm, parts_key, parts_scale, parts_bars, parts_density, parts_swing, parts_seed],
-                    outputs=[rhythm_out, chord_out, bass_out, drum_out, parts_status],
-                )
+                parts_btn.click(generate_music_parts, inputs=[parts_in, parts_bpm, parts_key, parts_scale, parts_bars, parts_density, parts_swing, parts_seed], outputs=[rhythm_out, chord_out, bass_out, drum_out, parts_status])
 
             with gr.Tab("🎼 Vocal → Full Arrangement"):
                 arrange_in = gr.Audio(label="Vocal Input", type="filepath", sources=["upload", "microphone"])
@@ -496,14 +427,8 @@ def build_app():
                 arrange_btn = gr.Button("🎼 Generate Full Arrangement", variant="primary")
                 arrangement_out = gr.File(label="Full Arrangement MIDI")
                 melody_arrangement_out = gr.File(label="Melody-only MIDI")
-                arrangement_status = gr.Markdown(
-                    "Generates melody + rhythm + chords + bass + drums as one synchronized MIDI arrangement."
-                )
-                arrange_btn.click(
-                    generate_full_arrangement,
-                    inputs=[arrange_in, arrange_bpm, arrange_key, arrange_scale, arrange_bars, arrange_fmin, arrange_fmax, arrange_seed],
-                    outputs=[arrangement_out, melody_arrangement_out, arrangement_status],
-                )
+                arrangement_status = gr.Markdown("Generates melody + rhythm + chords + bass + drums as one synchronized MIDI arrangement.")
+                arrange_btn.click(generate_full_arrangement, inputs=[arrange_in, arrange_bpm, arrange_key, arrange_scale, arrange_bars, arrange_fmin, arrange_fmax, arrange_seed], outputs=[arrangement_out, melody_arrangement_out, arrangement_status])
 
             with gr.Tab("🎚️ Mix & Master"):
                 mix_in = gr.Files(label="Upload Stems / Tracks", file_count="multiple", type="filepath")
@@ -514,14 +439,8 @@ def build_app():
                     target_peak = gr.Slider(0.8, 0.99, value=0.95, step=0.01, label="Target Peak")
                 mix_btn = gr.Button("🎚️ Mix + Master", variant="primary")
                 mix_out = gr.File(label="Mastered WAV")
-                mix_status = gr.Markdown(
-                    "Upload vocals/instruments/stems. The current engine performs a lightweight stereo sum followed by conservative bus compression, saturation and peak limiting."
-                )
-                mix_btn.click(
-                    mix_and_master,
-                    inputs=[mix_in, master_gain, compression, saturation, target_peak],
-                    outputs=[mix_out, mix_status],
-                )
+                mix_status = gr.Markdown("Upload vocals/instruments/stems. The current engine performs a lightweight stereo sum followed by conservative bus processing.")
+                mix_btn.click(mix_and_master, inputs=[mix_in, master_gain, compression, saturation, target_peak], outputs=[mix_out, mix_status])
 
             with gr.Tab("🧩 Stem Separation"):
                 stem_in = gr.Audio(label="Song / Mix Input", type="filepath", sources=["upload"])
@@ -536,8 +455,8 @@ def build_app():
 
         gr.Markdown(
             "---\n### 🧠 Engine roadmap\n"
-            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Neural Vocal Enhance backend · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
-            "Next: **Frame-wise pitch/timing AI + AI-conditioned music generation → production web UI/API → Android client.**"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Neural Vocal Enhance backend · ✅ Neural Pitch + Timing · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
+            "Next: **AI-conditioned Vocal → melody/rhythm/bass/drums/chords → AI arrangement/full-song generation → production web UI/API → Android client.**"
         )
 
     return demo
