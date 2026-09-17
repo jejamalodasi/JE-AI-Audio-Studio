@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import tempfile
+from typing import Any, Iterable
+import zipfile
+
+import numpy as np
+
+from ai.musicgen_melody import MusicGenConfig, generate_musicgen_melody
+from utils.audio_utils import load_audio, save_wav
+
+
+SECTION_ORDER = ("Intro", "Verse", "Chorus", "Bridge", "Outro")
+
+_SECTION_GUIDANCE = {
+    "Intro": "sparse opening, gentle entrance, establish the tonal mood, leave space for the vocal",
+    "Verse": "supportive verse groove, restrained instrumentation, clear rhythmic pocket, leave space for singing",
+    "Chorus": "full chorus lift, wider instrumentation, memorable energy, stronger drums and bass, emotional peak",
+    "Bridge": "contrasting bridge texture, briefly reduce the groove then build toward the final section",
+    "Outro": "warm resolving outro, gradually simpler arrangement, natural ending and gentle release",
+}
+
+
+@dataclass(frozen=True)
+class SongSection:
+    name: str
+    duration_seconds: float
+
+
+@dataclass(frozen=True)
+class SongBuilderConfig:
+    """Controls for the section-based MusicGen Song Sketch workflow."""
+
+    base_prompt: str = "Bengali folk-inspired acoustic backing track, warm harmonium, bamboo flute, hand percussion, soft bass, organic emotional production"
+    bpm: float | None = None
+    key: str | None = None
+    scale: str | None = None
+    sections: tuple[SongSection, ...] = (
+        SongSection("Intro", 6.0),
+        SongSection("Verse", 8.0),
+        SongSection("Chorus", 10.0),
+        SongSection("Bridge", 6.0),
+        SongSection("Outro", 6.0),
+    )
+    crossfade_seconds: float = 0.45
+    guidance_scale: float = 3.0
+    temperature: float = 1.0
+    top_k: int = 250
+    top_p: float = 0.0
+    seed: int = 42
+    device: str = "auto"
+    continuity: str = "vocal-anchor"
+    max_total_seconds: float = 90.0
+
+
+def _sanitize_sections(sections: Iterable[SongSection], max_total_seconds: float) -> list[SongSection]:
+    cleaned: list[SongSection] = []
+    for section in sections:
+        name = str(section.name).strip().title()
+        if not name:
+            continue
+        duration = float(np.clip(float(section.duration_seconds), 1.0, 30.0))
+        cleaned.append(SongSection(name, duration))
+
+    if not cleaned:
+        raise ValueError("At least one song section is required.")
+
+    total = sum(s.duration_seconds for s in cleaned)
+    limit = max(1.0, float(max_total_seconds))
+    if total <= limit:
+        return cleaned
+
+    scale = limit / total
+    return [SongSection(s.name, max(1.0, s.duration_seconds * scale)) for s in cleaned]
+
+
+def _build_prompt(config: SongBuilderConfig, section: SongSection, index: int, total: int) -> str:
+    pieces = [
+        str(config.base_prompt).strip(),
+        "instrumental backing music only, no lead vocal and no spoken words",
+        _SECTION_GUIDANCE.get(section.name, "balanced instrumental section with musical movement"),
+        f"section {index + 1} of {total}: {section.name}",
+    ]
+    if config.bpm and float(config.bpm) > 0:
+        pieces.append(f"around {float(config.bpm):.0f} BPM")
+    if config.key and str(config.key).lower() != "auto":
+        scale = f" {config.scale}" if config.scale and str(config.scale).lower() != "auto" else ""
+        pieces.append(f"centered around {config.key}{scale}")
+    if config.continuity == "chain":
+        pieces.append("continue naturally from the previous section while preserving groove, instrumentation and sonic identity")
+    else:
+        pieces.append("preserve the reference melody contour and keep instrumentation stylistically consistent with the other sections")
+    return ", ".join(pieces)
+
+
+def _as_stereo(audio: np.ndarray) -> np.ndarray:
+    array = np.asarray(audio, dtype=np.float32)
+    if array.ndim == 1:
+        return np.column_stack([array, array])
+    if array.ndim == 2:
+        if array.shape[1] == 2:
+            return array
+        if array.shape[0] == 2 and array.shape[1] != 2:
+            return array.T
+        return np.column_stack([array[:, 0], array[:, 0]])
+    raise ValueError("Generated audio must be mono or stereo.")
+
+
+def _crossfade_join(chunks: list[tuple[np.ndarray, int]], crossfade_seconds: float) -> tuple[np.ndarray, int]:
+    if not chunks:
+        raise ValueError("No generated sections were returned.")
+
+    target_sr = chunks[0][1]
+    result = _as_stereo(chunks[0][0])
+    fade = max(0.0, float(crossfade_seconds))
+
+    for raw_audio, sr in chunks[1:]:
+        if int(sr) != target_sr:
+            raise ValueError(f"Section sample-rate mismatch: {sr} != {target_sr}")
+        nxt = _as_stereo(raw_audio)
+        overlap = min(int(round(fade * target_sr)), result.shape[0] // 2, nxt.shape[0] // 2)
+        if overlap < 1:
+            result = np.concatenate([result, nxt], axis=0)
+            continue
+
+        left = np.linspace(1.0, 0.0, overlap, dtype=np.float32)[:, None]
+        right = 1.0 - left
+        blended = result[-overlap:] * left + nxt[:overlap] * right
+        result = np.concatenate([result[:-overlap], blended, nxt[overlap:]], axis=0)
+
+    peak = float(np.max(np.abs(result))) if result.size else 0.0
+    if peak > 0.98:
+        result = result * (0.98 / peak)
+    return np.clip(result, -1.0, 1.0).astype(np.float32), target_sr
+
+
+def _prepare_reference(path: str, work_dir: Path) -> str:
+    """Keep the conditioning reference bounded to 30s for predictable memory use."""
+    y, sr = load_audio(path, mono=False)
+    max_samples = int(30 * sr)
+    if y.shape[0] > max_samples:
+        y = y[:max_samples]
+        return save_wav(y, sr, str(work_dir / "conditioning_reference.wav"))
+    return path
+
+
+def build_song_sketch(
+    prompt_audio_path: str,
+    config: SongBuilderConfig | None = None,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Generate sections independently, optionally chain-condition them, then crossfade into one sketch."""
+    if not prompt_audio_path:
+        raise ValueError("prompt_audio_path is required")
+    source = Path(prompt_audio_path)
+    if not source.exists():
+        raise FileNotFoundError(str(source))
+
+    cfg = config or SongBuilderConfig()
+    sections = _sanitize_sections(cfg.sections, cfg.max_total_seconds)
+    total = sum(section.duration_seconds for section in sections)
+
+    generated_sections: list[dict[str, Any]] = []
+    chunks: list[tuple[np.ndarray, int]] = []
+
+    with tempfile.TemporaryDirectory(prefix="je_song_builder_") as tmp:
+        work_dir = Path(tmp)
+        reference_path = _prepare_reference(str(source), work_dir)
+        chain_reference = reference_path
+
+        for index, section in enumerate(sections):
+            section_seed = int(cfg.seed) + index
+            prompt = _build_prompt(cfg, section, index, len(sections))
+            section_file = work_dir / f"{index + 1:02d}_{section.name.lower()}_musicgen.wav"
+            result = generate_musicgen_melody(
+                chain_reference,
+                prompt,
+                output_path=str(section_file),
+                config=MusicGenConfig(
+                    duration_seconds=section.duration_seconds,
+                    guidance_scale=cfg.guidance_scale,
+                    temperature=cfg.temperature,
+                    top_k=cfg.top_k,
+                    top_p=cfg.top_p,
+                    device=cfg.device,
+                    seed=section_seed,
+                ),
+            )
+            audio, sr = load_audio(result["output_path"], mono=False)
+            chunks.append((audio, sr))
+            generated_sections.append(
+                {
+                    "name": section.name,
+                    "requested_duration_seconds": section.duration_seconds,
+                    "actual_duration_seconds": result["duration_seconds"],
+                    "prompt": prompt,
+                    "seed": section_seed,
+                    "path": result["output_path"],
+                }
+            )
+            if cfg.continuity == "chain":
+                chain_reference = result["output_path"]
+
+        final_audio, sample_rate = _crossfade_join(chunks, cfg.crossfade_seconds)
+        if output_path is None:
+            final_file = work_dir / f"{source.stem}_ai_song_sketch.wav"
+        else:
+            final_file = Path(output_path)
+            final_file.parent.mkdir(parents=True, exist_ok=True)
+        save_wav(final_audio, sample_rate, str(final_file))
+
+        export_dir = work_dir / "export"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        final_export = export_dir / final_file.name
+        save_wav(final_audio, sample_rate, str(final_export))
+
+        # Copy section files into the export bundle so the user can remix every section.
+        for item in generated_sections:
+            src = Path(item["path"])
+            dst = export_dir / src.name
+            dst.write_bytes(src.read_bytes())
+            item["path"] = str(dst)
+
+        manifest = {
+            "backend": "MusicGen Melody / Transformers",
+            "workflow": "JE AI Audio Studio AI Song Builder",
+            "total_requested_seconds": total,
+            "final_duration_seconds": float(final_audio.shape[0] / sample_rate),
+            "sample_rate": sample_rate,
+            "crossfade_seconds": cfg.crossfade_seconds,
+            "continuity": cfg.continuity,
+            "seed": cfg.seed,
+            "sections": generated_sections,
+            "license_note": "MusicGen model weights are CC-BY-NC 4.0; use a separately licensed model for commercial deployment.",
+        }
+        (export_dir / "song_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        bundle_path = Path(output_path).with_suffix(".zip") if output_path else source.with_name(f"{source.stem}_ai_song_sketch.zip")
+        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            for file in export_dir.iterdir():
+                bundle.write(file, arcname=file.name)
+
+        # output_path may point outside the temporary directory; return that final file.
+        final_real_path = str(final_file)
+        if final_file.parent == work_dir:
+            persistent = source.with_name(f"{source.stem}_ai_song_sketch.wav")
+            save_wav(final_audio, sample_rate, str(persistent))
+            final_real_path = str(persistent)
+
+        # Bundle paths were already written outside the temp workspace when output_path is provided.
+        if not bundle_path.exists():
+            raise RuntimeError("Song bundle could not be created.")
+
+    return {
+        "output_path": final_real_path,
+        "bundle_path": str(bundle_path),
+        "sections": generated_sections,
+        "section_count": len(generated_sections),
+        "requested_duration_seconds": total,
+        "duration_seconds": float(final_audio.shape[0] / sample_rate),
+        "sampling_rate": sample_rate,
+        "backend": "transformers-musicgen-melody-song-builder",
+        "continuity": cfg.continuity,
+        "license_note": "MusicGen model weights are CC-BY-NC 4.0; use a separately licensed model for commercial deployment.",
+    }
