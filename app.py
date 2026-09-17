@@ -20,6 +20,7 @@ from separation.engine import SeparationConfig, separate_stems
 from utils.audio_utils import load_audio, normalize, save_wav, trim_audio
 from vocal.analyzer import analyze_vocal
 from vocal.vocal_fix import VocalFixConfig, vocal_fix
+from vocal.vocal_fix_advanced import AdvancedVocalFixConfig, advanced_vocal_fix
 
 
 APP_TITLE = "JE AI Audio Studio"
@@ -69,6 +70,42 @@ def process_audio(path: Optional[str], operation: str, start: float, end: float,
     except Exception as exc:
         traceback.print_exc()
         return None, f"❌ {type(exc).__name__}: {exc}"
+
+
+def process_advanced_vocal(
+    path: Optional[str],
+    noise_reduction: float,
+    dereverb_strength: float,
+    pitch_strength: float,
+    timing_strength: float,
+    breath_reduction: float,
+    click_cleanup: bool,
+):
+    if not path:
+        return None, "Please upload a vocal file first."
+    try:
+        y, sr = load_audio(path)
+        cfg = AdvancedVocalFixConfig(
+            noise_reduction=float(noise_reduction),
+            dereverb=float(dereverb_strength),
+            pitch_correction=float(pitch_strength),
+            timing_correction=float(timing_strength),
+            breath_reduction=float(breath_reduction),
+            click_cleanup=bool(click_cleanup),
+        )
+        result = advanced_vocal_fix(y, sr, cfg)
+        out = save_wav(result, sr)
+        stats = audio_stats(result)
+        return out, (
+            "### 🧪 Advanced Vocal Fix complete\n"
+            f"Sample rate: **{sr:,} Hz**\n\n"
+            f"Peak: **{stats['peak_dbfs']:.2f} dBFS**\n\n"
+            f"RMS: **{stats['rms_dbfs']:.2f} dBFS**\n\n"
+            "Applied using the current lightweight DSP foundation."
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        return None, f"❌ Advanced Vocal Fix failed: {type(exc).__name__}: {exc}"
 
 
 def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
@@ -253,7 +290,7 @@ def build_app():
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Audio engine + Vocal Fix DSP + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
+            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
         )
 
         with gr.Tabs():
@@ -274,6 +311,27 @@ def build_app():
                         status = gr.Markdown()
                 inspect_btn.click(inspect_audio, inputs=audio_in, outputs=info)
                 process_btn.click(process_audio, inputs=[audio_in, operation, start, end, nr], outputs=[output, status])
+
+            with gr.Tab("🧪 Advanced Vocal Fix"):
+                advanced_in = gr.Audio(label="Vocal Input", type="filepath", sources=["upload", "microphone"])
+                with gr.Row():
+                    advanced_nr = gr.Slider(0.0, 2.0, value=0.65, step=0.05, label="Noise Reduction")
+                    advanced_dereverb = gr.Slider(0.0, 1.0, value=0.30, step=0.05, label="De-Reverb")
+                    advanced_pitch = gr.Slider(0.0, 1.0, value=0.0, step=0.05, label="Pitch Correction")
+                with gr.Row():
+                    advanced_timing = gr.Slider(0.0, 1.0, value=0.0, step=0.05, label="Timing Correction")
+                    advanced_breath = gr.Slider(0.0, 1.0, value=0.20, step=0.05, label="Breath Reduction")
+                    advanced_click = gr.Checkbox(value=True, label="Click / Pop Cleanup")
+                advanced_btn = gr.Button("🧪 Run Advanced Vocal Fix", variant="primary")
+                advanced_out = gr.File(label="Advanced Fixed WAV")
+                advanced_status = gr.Markdown(
+                    "Use small pitch/timing values first. The current pitch/timing modules are conservative DSP foundations, not frame-wise commercial Auto-Tune."
+                )
+                advanced_btn.click(
+                    process_advanced_vocal,
+                    inputs=[advanced_in, advanced_nr, advanced_dereverb, advanced_pitch, advanced_timing, advanced_breath, advanced_click],
+                    outputs=[advanced_out, advanced_status],
+                )
 
             with gr.Tab("🎼 Vocal → Melody / MIDI"):
                 melody_in = gr.Audio(label="Vocal Input", type="filepath", sources=["upload", "microphone"])
@@ -365,8 +423,8 @@ def build_app():
 
         gr.Markdown(
             "---\n### 🧠 Engine roadmap\n"
-            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Vocal→Melody/MIDI · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
-            "Next: **AI-conditioned arrangement models → advanced vocal correction → production-grade web UI → Android client/API.**"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Vocal→Melody/MIDI · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
+            "Next: **AI-conditioned vocal/music models → production web UI/API → Android client.**"
         )
 
     return demo
