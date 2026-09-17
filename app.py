@@ -6,6 +6,7 @@ from typing import Optional
 
 import gradio as gr
 
+from ai.arrangement_generator import AIConditionedArrangementConfig, generate_ai_conditioned_arrangement
 from ai.basic_pitch_transcriber import transcribe_with_basic_pitch
 from ai.neural_vocal_enhancement import enhance_vocal_neural
 from ai.pitch_timing_ai import PitchTimingAIConfig, correct_pitch_timing_ai
@@ -202,6 +203,43 @@ def transcribe_ai_midi(path: Optional[str], min_freq: float, max_freq: float, mi
         return None, f"❌ AI MIDI failed: {type(exc).__name__}: {exc}"
 
 
+def generate_ai_arrangement(path: Optional[str], bpm_override: float, bars: int, key: str, scale: str, melody_backend: str, min_freq: float, max_freq: float, min_note_ms: float, onset: float, frame: float, density_floor: float, density_ceiling: float, swing: float, seed: int):
+    if not path:
+        return None, None, "Please upload a vocal/audio file first."
+    try:
+        bpm_value = float(bpm_override)
+        config = AIConditionedArrangementConfig(
+            bpm=bpm_value if bpm_value > 0 else None,
+            bars=max(1, int(bars)),
+            seed=int(seed),
+            key=None if str(key) == "Auto" else str(key),
+            scale=None if str(scale) == "Auto" else str(scale),
+            melody_backend=str(melody_backend),
+            min_frequency=max(0.0, float(min_freq)),
+            max_frequency=max(0.0, float(max_freq)),
+            min_note_length_ms=max(1.0, float(min_note_ms)),
+            onset_threshold=float(onset),
+            frame_threshold=float(frame),
+            density_floor=float(density_floor),
+            density_ceiling=float(density_ceiling),
+            swing=float(swing),
+        )
+        result = generate_ai_conditioned_arrangement(path, config=config)
+        status = (
+            "### 🤖 AI Conditioned Arrangement complete\n"
+            f"Detected/selected tempo: **{result['bpm']:.1f} BPM**\n\n"
+            f"Key: **{result['key']} {result['scale']}** · confidence **{result['key_confidence']:.3f}**\n\n"
+            f"Vocal activity: **{result['activity']:.3f}** · generated density **{result['density']:.3f}**\n\n"
+            f"Melody backend: **{result['melody_backend']}** · notes **{len(result['melody'])}**\n\n"
+            f"Tracks: **melody + rhythm + chords + bass + drums**\n\n"
+            f"Condition backend: **{result['condition_backend']}**"
+        )
+        return result["arrangement_path"], result["melody_path"], status
+    except Exception as exc:
+        traceback.print_exc()
+        return None, None, f"❌ AI arrangement failed: {type(exc).__name__}: {exc}"
+
+
 def generate_full_arrangement(path: Optional[str], bpm: float, key: str, scale: str, bars: int, fmin: float, fmax: float, seed: int):
     if not path:
         return None, None, "Please upload a vocal file first."
@@ -296,7 +334,7 @@ def build_app():
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Neural Vocal Enhance + Neural Pitch/Timing + AI MIDI + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
+            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Neural Vocal Enhance + Neural Pitch/Timing + AI MIDI + AI Conditioned Arrangement + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
         )
         with gr.Tabs():
             with gr.Tab("🎚️ Audio / Vocal Fix"):
@@ -392,6 +430,54 @@ def build_app():
                 ai_midi_status = gr.Markdown("Optional neural backend. Install the AI requirements in Colab/server before running this tab.")
                 ai_midi_btn.click(transcribe_ai_midi, inputs=[ai_midi_in, ai_min_freq, ai_max_freq, ai_min_note, ai_onset, ai_frame, ai_midi_bpm], outputs=[ai_midi_out, ai_midi_status])
 
+            with gr.Tab("🤖 AI Conditioned Arrangement"):
+                ai_arrange_in = gr.Audio(label="Vocal / Audio Input", type="filepath", sources=["upload", "microphone"])
+                gr.Markdown("Upload a vocal. The conditioning layer estimates tempo, key/scale and vocal activity, then generates synchronized melody + rhythm + chords + bass + drums.")
+                with gr.Row():
+                    ai_arrange_bpm = gr.Number(value=0, minimum=0, label="BPM override (0 = auto-detect)")
+                    ai_arrange_bars = gr.Slider(1, 64, value=8, step=1, label="Bars")
+                    ai_arrange_key = gr.Dropdown(["Auto"] + KEYS, value="Auto", label="Key override")
+                    ai_arrange_scale = gr.Dropdown(["Auto"] + SCALES, value="Auto", label="Scale override")
+                with gr.Row():
+                    ai_arrange_backend = gr.Dropdown(["auto", "basic_pitch", "pyin"], value="auto", label="Melody backend")
+                    ai_arrange_min_freq = gr.Number(value=65.41, minimum=0, label="Min pitch (Hz)")
+                    ai_arrange_max_freq = gr.Number(value=1046.50, minimum=0, label="Max pitch (Hz)")
+                with gr.Row():
+                    ai_arrange_min_note = gr.Slider(20, 1000, value=58, step=1, label="Min note length (ms)")
+                    ai_arrange_onset = gr.Slider(0.05, 0.95, value=0.50, step=0.05, label="Basic Pitch onset")
+                    ai_arrange_frame = gr.Slider(0.05, 0.95, value=0.30, step=0.05, label="Basic Pitch frame")
+                with gr.Row():
+                    ai_arrange_density_floor = gr.Slider(0.0, 1.0, value=0.28, step=0.05, label="Density floor")
+                    ai_arrange_density_ceiling = gr.Slider(0.0, 1.0, value=0.78, step=0.05, label="Density ceiling")
+                    ai_arrange_swing = gr.Slider(-0.5, 0.5, value=0.0, step=0.05, label="Swing")
+                    ai_arrange_seed = gr.Number(value=42, precision=0, label="Seed")
+                ai_arrange_btn = gr.Button("🤖 Generate AI Conditioned Arrangement", variant="primary")
+                with gr.Row():
+                    ai_arrange_out = gr.File(label="AI Arrangement MIDI")
+                    ai_arrange_melody_out = gr.File(label="AI Melody MIDI")
+                ai_arrange_status = gr.Markdown("This is a modular conditioning pipeline, not yet an end-to-end learned full-song model.")
+                ai_arrange_btn.click(
+                    generate_ai_arrangement,
+                    inputs=[
+                        ai_arrange_in,
+                        ai_arrange_bpm,
+                        ai_arrange_bars,
+                        ai_arrange_key,
+                        ai_arrange_scale,
+                        ai_arrange_backend,
+                        ai_arrange_min_freq,
+                        ai_arrange_max_freq,
+                        ai_arrange_min_note,
+                        ai_arrange_onset,
+                        ai_arrange_frame,
+                        ai_arrange_density_floor,
+                        ai_arrange_density_ceiling,
+                        ai_arrange_swing,
+                        ai_arrange_seed,
+                    ],
+                    outputs=[ai_arrange_out, ai_arrange_melody_out, ai_arrange_status],
+                )
+
             with gr.Tab("🎛️ Vocal → Music Parts"):
                 parts_in = gr.Audio(label="Vocal / Audio Input", type="filepath", sources=["upload", "microphone"])
                 with gr.Row():
@@ -455,8 +541,8 @@ def build_app():
 
         gr.Markdown(
             "---\n### 🧠 Engine roadmap\n"
-            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Neural Vocal Enhance backend · ✅ Neural Pitch + Timing · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
-            "Next: **AI-conditioned Vocal → melody/rhythm/bass/drums/chords → AI arrangement/full-song generation → production web UI/API → Android client.**"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Neural Vocal Enhance backend · ✅ Neural Pitch + Timing · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ AI Conditioned Arrangement · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
+            "Next: **Learned AI music generation/full-song synthesis → production web UI/API → Android client.**"
         )
 
     return demo
