@@ -7,6 +7,7 @@ from typing import Optional
 import gradio as gr
 
 from ai.basic_pitch_transcriber import transcribe_with_basic_pitch
+from ai.neural_vocal_enhancement import enhance_vocal_neural
 from ai.vocal_to_melody import MelodyConfig, vocal_to_melody
 from ai.vocal_to_music import VocalMusicConfig, generate_from_vocal
 from mixing.loudness import audio_stats
@@ -107,6 +108,36 @@ def process_advanced_vocal(
     except Exception as exc:
         traceback.print_exc()
         return None, f"❌ Advanced Vocal Fix failed: {type(exc).__name__}: {exc}"
+
+
+def enhance_vocal_with_ai(
+    path: Optional[str],
+    model_name: str,
+    device: str,
+    atten_lim_db: float,
+    post_filter: bool,
+):
+    if not path:
+        return None, "Please upload a vocal/audio file first."
+    try:
+        result = enhance_vocal_neural(
+            path,
+            model_name=str(model_name),
+            device=str(device),
+            post_filter=bool(post_filter),
+            atten_lim_db=float(atten_lim_db),
+        )
+        return result["output_path"], (
+            "### 🧠 Neural Vocal Enhance complete\n"
+            f"Backend: **DeepFilterNet**\n\n"
+            f"Model: **{result['model']}**\n\n"
+            f"Device: **{result['device']}**\n\n"
+            f"Sample rate restored to: **{result['sample_rate']:,} Hz**\n\n"
+            f"Duration: **{result['duration_seconds']:.2f}s**"
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        return None, f"❌ Neural Vocal Enhance failed: {type(exc).__name__}: {exc}"
 
 
 def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
@@ -332,7 +363,7 @@ def build_app():
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + AI MIDI + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
+            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Neural Vocal Enhance + AI MIDI + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
         )
 
         with gr.Tabs():
@@ -373,6 +404,25 @@ def build_app():
                     process_advanced_vocal,
                     inputs=[advanced_in, advanced_nr, advanced_dereverb, advanced_pitch, advanced_timing, advanced_breath, advanced_click],
                     outputs=[advanced_out, advanced_status],
+                )
+
+            with gr.Tab("🧠 Neural Vocal Enhance"):
+                neural_in = gr.Audio(label="Vocal / Speech Input", type="filepath", sources=["upload", "microphone"])
+                with gr.Row():
+                    neural_model = gr.Dropdown(["DeepFilterNet3"], value="DeepFilterNet3", label="Neural Model")
+                    neural_device = gr.Dropdown(["auto", "cpu", "cuda"], value="auto", label="Device")
+                with gr.Row():
+                    neural_atten = gr.Slider(0.0, 30.0, value=12.0, step=1.0, label="Maximum attenuation limit (dB)")
+                    neural_post = gr.Checkbox(value=False, label="Post-filter")
+                neural_btn = gr.Button("🧠 Enhance Vocal with Neural AI", variant="primary")
+                neural_out = gr.File(label="Neural Enhanced WAV")
+                neural_status = gr.Markdown(
+                    "Optional DeepFilterNet backend. It is intended for noisy vocal/speech enhancement; it is not a music-source separator. GPU/Colab is recommended for longer files."
+                )
+                neural_btn.click(
+                    enhance_vocal_with_ai,
+                    inputs=[neural_in, neural_model, neural_device, neural_atten, neural_post],
+                    outputs=[neural_out, neural_status],
                 )
 
             with gr.Tab("🎼 Vocal → Melody / MIDI"):
@@ -486,8 +536,8 @@ def build_app():
 
         gr.Markdown(
             "---\n### 🧠 Engine roadmap\n"
-            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
-            "Next: **Neural vocal restoration + frame-wise pitch/timing AI → AI-conditioned music generation → production web UI/API → Android client.**"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Neural Vocal Enhance backend · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
+            "Next: **Frame-wise pitch/timing AI + AI-conditioned music generation → production web UI/API → Android client.**"
         )
 
     return demo
