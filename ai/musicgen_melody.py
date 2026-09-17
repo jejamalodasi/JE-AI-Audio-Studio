@@ -19,6 +19,7 @@ class MusicGenConfig:
     top_k: int = 250
     top_p: float = 0.0
     device: str = "auto"
+    seed: int = 42
 
 
 _MODEL_CACHE: dict[tuple[str, str], tuple[Any, Any]] = {}
@@ -131,6 +132,11 @@ def generate_musicgen_melody(
     if top_p > 0.0:
         generation_kwargs["top_p"] = float(np.clip(top_p, 1e-4, 1.0))
 
+    seed = int(cfg.seed)
+    torch.manual_seed(seed)
+    if selected_device == "cuda" and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     with torch.inference_mode():
         audio_values = model.generate(**inputs, **generation_kwargs)
 
@@ -154,6 +160,7 @@ def generate_musicgen_melody(
         "sampling_rate": sampling_rate,
         "duration_seconds": float(audio.shape[-1] / sampling_rate) if audio.size else 0.0,
         "max_new_tokens": max_new_tokens,
+        "seed": seed,
         "backend": "transformers-musicgen-melody",
         "license_note": "MusicGen model weights are CC-BY-NC 4.0; use a separately licensed model for commercial deployment.",
     }
