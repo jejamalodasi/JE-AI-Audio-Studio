@@ -14,7 +14,7 @@ class DrumConfig:
 
 
 def generate_drums(config: DrumConfig | None = None) -> list[dict]:
-    """Map a rhythm grid onto a compact kick/snare/hat drum pattern."""
+    """Map a rhythm grid onto a compact kick/snare/hat pattern."""
     cfg = config or DrumConfig()
     grid = generate_rhythm(RhythmConfig(bpm=cfg.bpm, bars=cfg.bars, density=cfg.density, seed=cfg.seed))
     events = []
@@ -25,6 +25,12 @@ def generate_drums(config: DrumConfig | None = None) -> list[dict]:
         elif pos in (4, 12):
             drum = "snare"
         else:
-            drum = "hat"
-        events.append({"time": item["time"], "drum": drum, "velocity": item["velocity"]})
+            drum = "closed_hat"
+        events.append({
+            "time": item["time"],
+            "drum": drum,
+            "instrument": drum,
+            "velocity": item["velocity"],
+            "duration": 0.08,
+        })
     return events
