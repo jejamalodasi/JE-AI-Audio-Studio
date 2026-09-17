@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import tempfile
 import traceback
 from typing import Optional
 
 import gradio as gr
 
+from ai.vocal_to_melody import MelodyConfig, vocal_to_melody
 from utils.audio_utils import load_audio, normalize, peak_dbfs, rms_dbfs, save_wav, trim_audio
 from vocal.analyzer import analyze_vocal
 from vocal.vocal_fix import VocalFixConfig, vocal_fix
@@ -56,42 +58,92 @@ def process_audio(path: Optional[str], operation: str, start: float, end: float,
         return None, f"❌ {type(exc).__name__}: {exc}"
 
 
+def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
+    if not path:
+        return None, "Please upload a vocal file first."
+    try:
+        y, sr = load_audio(path)
+        with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tmp:
+            midi_path = tmp.name
+        midi_path, notes = vocal_to_melody(
+            y,
+            sr,
+            output_path=midi_path,
+            bpm=bpm,
+            config=MelodyConfig(fmin=fmin, fmax=fmax),
+        )
+        preview = notes[:20]
+        lines = [f"### 🎼 Melody extracted — {len(notes)} notes"]
+        lines.append(f"BPM: **{bpm:.0f}**")
+        if preview:
+            lines.append("\nFirst notes:")
+            lines.extend(
+                f"- MIDI **{n['note']}** · {n['start']:.2f}s · {n['duration']:.2f}s"
+                for n in preview
+            )
+        return midi_path, "\n".join(lines)
+    except Exception as exc:
+        traceback.print_exc()
+        return None, f"❌ Melody extraction failed: {type(exc).__name__}: {exc}"
+
+
 def build_app():
     with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Phase 1 audio engine + first-generation Vocal Fix DSP pipeline."
+            "Phase 1 audio engine + Vocal Fix DSP + first Vocal→MIDI melody engine."
         )
 
-        with gr.Row():
-            with gr.Column(scale=1):
-                audio_in = gr.Audio(label="Input Audio", type="filepath", sources=["upload", "microphone"])
-                inspect_btn = gr.Button("🔎 Analyze Audio", variant="secondary")
-                info = gr.Markdown("Upload a file and press **Analyze Audio**.")
-
-            with gr.Column(scale=1):
-                operation = gr.Radio(
-                    ["Vocal Fix", "Normalize", "Trim", "Pass-through"],
-                    value="Vocal Fix",
-                    label="Operation",
-                )
-                nr = gr.Slider(0.0, 2.0, value=0.65, step=0.05, label="Noise Reduction Strength")
+        with gr.Tabs():
+            with gr.Tab("🎚️ Audio / Vocal Fix"):
                 with gr.Row():
-                    start = gr.Number(value=0, minimum=0, label="Start (seconds)")
-                    end = gr.Number(value=0, minimum=0, label="End (seconds, 0 = file end)")
-                process_btn = gr.Button("⚡ Process", variant="primary")
-                output = gr.File(label="Processed WAV")
-                status = gr.Markdown()
+                    with gr.Column(scale=1):
+                        audio_in = gr.Audio(label="Input Audio", type="filepath", sources=["upload", "microphone"])
+                        inspect_btn = gr.Button("🔎 Analyze Audio", variant="secondary")
+                        info = gr.Markdown("Upload a file and press **Analyze Audio**.")
+
+                    with gr.Column(scale=1):
+                        operation = gr.Radio(
+                            ["Vocal Fix", "Normalize", "Trim", "Pass-through"],
+                            value="Vocal Fix",
+                            label="Operation",
+                        )
+                        nr = gr.Slider(0.0, 2.0, value=0.65, step=0.05, label="Noise Reduction Strength")
+                        with gr.Row():
+                            start = gr.Number(value=0, minimum=0, label="Start (seconds)")
+                            end = gr.Number(value=0, minimum=0, label="End (seconds, 0 = file end)")
+                        process_btn = gr.Button("⚡ Process", variant="primary")
+                        output = gr.File(label="Processed WAV")
+                        status = gr.Markdown()
+
+                inspect_btn.click(inspect_audio, inputs=audio_in, outputs=info)
+                process_btn.click(process_audio, inputs=[audio_in, operation, start, end, nr], outputs=[output, status])
+
+            with gr.Tab("🎼 Vocal → Melody / MIDI"):
+                melody_in = gr.Audio(
+                    label="Vocal Input",
+                    type="filepath",
+                    sources=["upload", "microphone"],
+                )
+                with gr.Row():
+                    bpm = gr.Slider(40, 240, value=120, step=1, label="BPM")
+                    fmin = gr.Number(value=65.41, label="Minimum pitch (Hz)")
+                    fmax = gr.Number(value=1046.50, label="Maximum pitch (Hz)")
+                melody_btn = gr.Button("🎼 Extract Melody → MIDI", variant="primary")
+                melody_out = gr.File(label="MIDI File")
+                melody_status = gr.Markdown("Upload a mostly-monophonic vocal, then extract its melody.")
+                melody_btn.click(
+                    extract_melody,
+                    inputs=[melody_in, bpm, fmin, fmax],
+                    outputs=[melody_out, melody_status],
+                )
 
         gr.Markdown(
-            "---\n### 🧠 Pipeline status\n"
-            "Vocal Fix: **Noise Reduction + High-pass + De-esser + Gentle Compression + Peak Safety**\n\n"
-            "Next: ML pitch correction, vocal→MIDI, stem separation, melody/rhythm/bass/drum/chord generation."
+            "---\n### 🧠 Engine roadmap\n"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Vocal→Melody/MIDI foundation\n\n"
+            "Next: **ML pitch correction → de-reverb → timing correction → stem separation → rhythm/bass/drums/chords → full arrangement.**"
         )
-
-        inspect_btn.click(inspect_audio, inputs=audio_in, outputs=info)
-        process_btn.click(process_audio, inputs=[audio_in, operation, start, end, nr], outputs=[output, status])
 
     return demo
 
