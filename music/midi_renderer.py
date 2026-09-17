@@ -5,6 +5,7 @@ from typing import Iterable
 
 import mido
 
+from .gm_drum_map import resolve_drum_note
 
 NOTE_MIN = 0
 NOTE_MAX = 127
@@ -38,11 +39,10 @@ def render_arrangement_midi(
     bpm: float = 120.0,
     ticks_per_beat: int = 480,
 ) -> str:
-    """Render generated music metadata into one multi-track MIDI file.
+    """Render generated metadata into one multi-track MIDI arrangement.
 
-    This is intentionally a lightweight MIDI renderer. It does not synthesize
-    audio; the resulting MIDI can be opened in a DAW or rendered by a MIDI
-    instrument later.
+    Percussion uses the common General MIDI drum-note map on channel 10.
+    The renderer remains lightweight and does not synthesize audio.
     """
     if not output_path:
         raise ValueError("output_path is required")
@@ -81,8 +81,7 @@ def render_arrangement_midi(
     for item in chords or []:
         start = item.get("start", item.get("time", 0.0))
         duration = item.get("duration", 1.0)
-        notes = item.get("notes", [])
-        for note in notes:
+        for note in item.get("notes", []):
             _add_note_events(chord_events, start, duration, note, item.get("velocity", 68))
 
     bass_events: list[tuple[float, str, int, int]] = []
@@ -91,13 +90,25 @@ def render_arrangement_midi(
 
     drum_events: list[tuple[float, str, int, int]] = []
     for item in drums or []:
-        note = item.get("note", item.get("midi", 36))
-        _add_note_events(drum_events, item.get("start", item.get("time", 0.0)), item.get("duration", 0.08), note, item.get("velocity", 100))
+        raw_note = item.get("note", item.get("midi", item.get("instrument", 36)))
+        _add_note_events(
+            drum_events,
+            item.get("start", item.get("time", 0.0)),
+            item.get("duration", 0.08),
+            resolve_drum_note(raw_note),
+            item.get("velocity", 100),
+        )
 
     rhythm_events: list[tuple[float, str, int, int]] = []
     if rhythm:
         for item in rhythm.get("events", []):
-            _add_note_events(rhythm_events, item.get("time", 0.0), rhythm.get("step_seconds", 0.125) * 0.75, 42, int(float(item.get("velocity", 0.65)) * 127))
+            _add_note_events(
+                rhythm_events,
+                item.get("time", 0.0),
+                rhythm.get("step_seconds", 0.125) * 0.75,
+                42,
+                int(float(item.get("velocity", 0.65)) * 127),
+            )
 
     add_track("Melody", 0, melody_events)
     add_track("Chords", 1, chord_events)
