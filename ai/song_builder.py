@@ -10,6 +10,7 @@ import zipfile
 import numpy as np
 
 from ai.musicgen_melody import MusicGenConfig, generate_musicgen_melody
+from mixing.mixer import mix_audio_arrays
 from utils.audio_utils import load_audio, save_wav
 
 
@@ -53,6 +54,8 @@ class SongBuilderConfig:
     seed: int = 42
     device: str = "auto"
     continuity: str = "vocal-anchor"
+    vocal_gain_db: float = -1.0
+    music_gain_db: float = -3.0
     max_total_seconds: float = 90.0
 
 
@@ -64,15 +67,12 @@ def _sanitize_sections(sections: Iterable[SongSection], max_total_seconds: float
             continue
         duration = float(np.clip(float(section.duration_seconds), 1.0, 30.0))
         cleaned.append(SongSection(name, duration))
-
     if not cleaned:
         raise ValueError("At least one song section is required.")
-
     total = sum(s.duration_seconds for s in cleaned)
     limit = max(1.0, float(max_total_seconds))
     if total <= limit:
         return cleaned
-
     scale = limit / total
     return [SongSection(s.name, max(1.0, s.duration_seconds * scale)) for s in cleaned]
 
@@ -112,11 +112,9 @@ def _as_stereo(audio: np.ndarray) -> np.ndarray:
 def _crossfade_join(chunks: list[tuple[np.ndarray, int]], crossfade_seconds: float) -> tuple[np.ndarray, int]:
     if not chunks:
         raise ValueError("No generated sections were returned.")
-
     target_sr = chunks[0][1]
     result = _as_stereo(chunks[0][0])
     fade = max(0.0, float(crossfade_seconds))
-
     for raw_audio, sr in chunks[1:]:
         if int(sr) != target_sr:
             raise ValueError(f"Section sample-rate mismatch: {sr} != {target_sr}")
@@ -125,20 +123,17 @@ def _crossfade_join(chunks: list[tuple[np.ndarray, int]], crossfade_seconds: flo
         if overlap < 1:
             result = np.concatenate([result, nxt], axis=0)
             continue
-
         left = np.linspace(1.0, 0.0, overlap, dtype=np.float32)[:, None]
         right = 1.0 - left
         blended = result[-overlap:] * left + nxt[:overlap] * right
         result = np.concatenate([result[:-overlap], blended, nxt[overlap:]], axis=0)
-
     peak = float(np.max(np.abs(result))) if result.size else 0.0
     if peak > 0.98:
-        result = result * (0.98 / peak)
+        result *= 0.98 / peak
     return np.clip(result, -1.0, 1.0).astype(np.float32), target_sr
 
 
 def _prepare_reference(path: str, work_dir: Path) -> str:
-    """Keep the conditioning reference bounded to 30s for predictable memory use."""
     y, sr = load_audio(path, mono=False)
     max_samples = int(30 * sr)
     if y.shape[0] > max_samples:
@@ -147,12 +142,29 @@ def _prepare_reference(path: str, work_dir: Path) -> str:
     return path
 
 
+def _prepare_vocal_preview(path: str, target_sr: int, target_samples: int, work_dir: Path) -> str:
+    y, sr = load_audio(path, mono=False)
+    if int(sr) != int(target_sr):
+        import librosa
+        if y.ndim == 1:
+            y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
+        else:
+            y = np.column_stack(
+                [librosa.resample(y[:, ch], orig_sr=sr, target_sr=target_sr) for ch in range(y.shape[1])]
+            )
+    if y.shape[0] > target_samples:
+        y = y[:target_samples]
+    elif y.shape[0] < target_samples:
+        pad_shape = (target_samples - y.shape[0],) + y.shape[1:]
+        y = np.concatenate([y, np.zeros(pad_shape, dtype=np.float32)], axis=0)
+    return save_wav(y, target_sr, str(work_dir / "vocal_preview.wav"))
+
+
 def build_song_sketch(
     prompt_audio_path: str,
     config: SongBuilderConfig | None = None,
     output_path: str | None = None,
 ) -> dict[str, Any]:
-    """Generate sections independently, optionally chain-condition them, then crossfade into one sketch."""
     if not prompt_audio_path:
         raise ValueError("prompt_audio_path is required")
     source = Path(prompt_audio_path)
@@ -198,31 +210,41 @@ def build_song_sketch(
                     "actual_duration_seconds": result["duration_seconds"],
                     "prompt": prompt,
                     "seed": section_seed,
-                    "path": result["output_path"],
+                    "filename": section_file.name,
                 }
             )
             if cfg.continuity == "chain":
                 chain_reference = result["output_path"]
 
         final_audio, sample_rate = _crossfade_join(chunks, cfg.crossfade_seconds)
+
         if output_path is None:
-            final_file = work_dir / f"{source.stem}_ai_song_sketch.wav"
+            final_file = source.with_name(f"{source.stem}_ai_song_sketch.wav")
         else:
             final_file = Path(output_path)
             final_file.parent.mkdir(parents=True, exist_ok=True)
         save_wav(final_audio, sample_rate, str(final_file))
 
+        vocal_path = _prepare_vocal_preview(str(source), sample_rate, final_audio.shape[0], work_dir)
+        vocal_audio, _ = load_audio(vocal_path, mono=False)
+        full_song = mix_audio_arrays(
+            [vocal_audio, final_audio],
+            gains_db=[float(cfg.vocal_gain_db), float(cfg.music_gain_db)],
+        )
+        preview_file = final_file.with_name(f"{final_file.stem}_vocal_preview.wav")
+        save_wav(full_song, sample_rate, str(preview_file))
+
         export_dir = work_dir / "export"
         export_dir.mkdir(parents=True, exist_ok=True)
         final_export = export_dir / final_file.name
+        preview_export = export_dir / preview_file.name
         save_wav(final_audio, sample_rate, str(final_export))
+        save_wav(full_song, sample_rate, str(preview_export))
 
-        # Copy section files into the export bundle so the user can remix every section.
-        for item in generated_sections:
-            src = Path(item["path"])
+        for index, item in enumerate(generated_sections):
+            src = work_dir / f"{index + 1:02d}_{item['name'].lower()}_musicgen.wav"
             dst = export_dir / src.name
             dst.write_bytes(src.read_bytes())
-            item["path"] = str(dst)
 
         manifest = {
             "backend": "MusicGen Melody / Transformers",
@@ -233,29 +255,34 @@ def build_song_sketch(
             "crossfade_seconds": cfg.crossfade_seconds,
             "continuity": cfg.continuity,
             "seed": cfg.seed,
+            "vocal_gain_db": cfg.vocal_gain_db,
+            "music_gain_db": cfg.music_gain_db,
             "sections": generated_sections,
             "license_note": "MusicGen model weights are CC-BY-NC 4.0; use a separately licensed model for commercial deployment.",
         }
         (export_dir / "song_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        bundle_path = Path(output_path).with_suffix(".zip") if output_path else source.with_name(f"{source.stem}_ai_song_sketch.zip")
+        bundle_path = (
+            Path(output_path).with_suffix(".zip")
+            if output_path
+            else source.with_name(f"{source.stem}_ai_song_sketch.zip")
+        )
         with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
             for file in export_dir.iterdir():
                 bundle.write(file, arcname=file.name)
 
-        # output_path may point outside the temporary directory; return that final file.
         final_real_path = str(final_file)
         if final_file.parent == work_dir:
             persistent = source.with_name(f"{source.stem}_ai_song_sketch.wav")
+            persistent_preview = source.with_name(f"{source.stem}_ai_song_sketch_vocal_preview.wav")
             save_wav(final_audio, sample_rate, str(persistent))
+            save_wav(full_song, sample_rate, str(persistent_preview))
             final_real_path = str(persistent)
-
-        # Bundle paths were already written outside the temp workspace when output_path is provided.
-        if not bundle_path.exists():
-            raise RuntimeError("Song bundle could not be created.")
+            preview_file = persistent_preview
 
     return {
         "output_path": final_real_path,
+        "preview_path": str(preview_file),
         "bundle_path": str(bundle_path),
         "sections": generated_sections,
         "section_count": len(generated_sections),
