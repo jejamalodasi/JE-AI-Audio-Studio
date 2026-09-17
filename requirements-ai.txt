@@ -3,3 +3,5 @@
 basic-pitch==0.4.0
 deepfilternet
 torchcrepe==0.0.24
+transformers>=4.40,<6
+accelerate>=0.30,<2
