@@ -6,6 +6,7 @@ from typing import Optional
 
 import gradio as gr
 
+from ai.basic_pitch_transcriber import transcribe_with_basic_pitch
 from ai.vocal_to_melody import MelodyConfig, vocal_to_melody
 from ai.vocal_to_music import VocalMusicConfig, generate_from_vocal
 from mixing.loudness import audio_stats
@@ -134,6 +135,47 @@ def extract_melody(path: Optional[str], bpm: float, fmin: float, fmax: float):
     except Exception as exc:
         traceback.print_exc()
         return None, f"❌ Melody extraction failed: {type(exc).__name__}: {exc}"
+
+
+def transcribe_ai_midi(
+    path: Optional[str],
+    min_freq: float,
+    max_freq: float,
+    min_note_ms: float,
+    onset: float,
+    frame: float,
+    bpm: float,
+):
+    """Run the optional neural Basic Pitch backend and return a MIDI file."""
+    if not path:
+        return None, "Please upload an audio file first."
+    try:
+        result = transcribe_with_basic_pitch(
+            path,
+            minimum_frequency=float(min_freq) if min_freq and float(min_freq) > 0 else None,
+            maximum_frequency=float(max_freq) if max_freq and float(max_freq) > 0 else None,
+            minimum_note_length_ms=max(1.0, float(min_note_ms)),
+            onset_threshold=float(onset),
+            frame_threshold=float(frame),
+            midi_tempo=float(bpm),
+        )
+        preview = result["notes"][:12]
+        lines = [
+            "### 🧠 AI MIDI complete",
+            "Backend: **Spotify Basic Pitch**",
+            f"Notes detected: **{result['note_count']}**",
+            f"MIDI tempo: **{float(bpm):.0f} BPM**",
+        ]
+        if preview:
+            lines.append("\nFirst detected notes:")
+            lines.extend(
+                f"- MIDI **{n['note']}** · {n['start']:.2f}s → {n['end']:.2f}s · velocity {n['velocity']:.2f}"
+                for n in preview
+            )
+        return result["midi_path"], "\n\n".join(lines)
+    except Exception as exc:
+        traceback.print_exc()
+        return None, f"❌ AI MIDI failed: {type(exc).__name__}: {exc}"
 
 
 def generate_full_arrangement(
@@ -290,7 +332,7 @@ def build_app():
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
+            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + AI MIDI + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
         )
 
         with gr.Tabs():
@@ -343,6 +385,27 @@ def build_app():
                 melody_out = gr.File(label="MIDI File")
                 melody_status = gr.Markdown("Upload a mostly-monophonic vocal, then extract its melody.")
                 melody_btn.click(extract_melody, inputs=[melody_in, bpm, fmin, fmax], outputs=[melody_out, melody_status])
+
+            with gr.Tab("🧠 AI MIDI / Basic Pitch"):
+                ai_midi_in = gr.Audio(label="Audio Input", type="filepath", sources=["upload", "microphone"])
+                with gr.Row():
+                    ai_midi_bpm = gr.Slider(40, 240, value=120, step=1, label="MIDI Tempo (BPM)")
+                    ai_min_freq = gr.Number(value=65.41, minimum=0, label="Minimum pitch (Hz, 0 = automatic)")
+                    ai_max_freq = gr.Number(value=1046.50, minimum=0, label="Maximum pitch (Hz, 0 = automatic)")
+                with gr.Row():
+                    ai_min_note = gr.Slider(20, 1000, value=58, step=1, label="Minimum note length (ms)")
+                    ai_onset = gr.Slider(0.05, 0.95, value=0.50, step=0.05, label="Onset threshold")
+                    ai_frame = gr.Slider(0.05, 0.95, value=0.30, step=0.05, label="Frame threshold")
+                ai_midi_btn = gr.Button("🧠 Transcribe with AI → MIDI", variant="primary")
+                ai_midi_out = gr.File(label="AI MIDI File")
+                ai_midi_status = gr.Markdown(
+                    "Optional neural backend. Install **basic-pitch** in Colab/server before running this tab. It can expose pitch-bend-aware MIDI note events."
+                )
+                ai_midi_btn.click(
+                    transcribe_ai_midi,
+                    inputs=[ai_midi_in, ai_min_freq, ai_max_freq, ai_min_note, ai_onset, ai_frame, ai_midi_bpm],
+                    outputs=[ai_midi_out, ai_midi_status],
+                )
 
             with gr.Tab("🎛️ Vocal → Music Parts"):
                 parts_in = gr.Audio(label="Vocal / Audio Input", type="filepath", sources=["upload", "microphone"])
@@ -423,8 +486,8 @@ def build_app():
 
         gr.Markdown(
             "---\n### 🧠 Engine roadmap\n"
-            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Vocal→Melody/MIDI · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
-            "Next: **AI-conditioned vocal/music models → production web UI/API → Android client.**"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
+            "Next: **Neural vocal restoration + frame-wise pitch/timing AI → AI-conditioned music generation → production web UI/API → Android client.**"
         )
 
     return demo
