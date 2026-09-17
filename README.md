@@ -16,6 +16,7 @@ The project now has a crash-resistant Gradio workspace plus lightweight vocal, m
 - Basic Vocal Fix DSP with conservative noise reduction, de-essing, compression and high-pass filtering
 - Advanced Vocal Fix controls for noise reduction, de-reverb, pitch correction, timing correction, breath reduction and click/pop cleanup
 - Vocal → Melody / MIDI extraction
+- **Optional neural AI MIDI transcription with Spotify Basic Pitch**
 - Vocal → Music Parts: rhythm, chords, bass and drums
 - Full multi-track MIDI arrangement rendering
 - General MIDI percussion-name mapping and Channel 10 drum rendering
@@ -24,6 +25,18 @@ The project now has a crash-resistant Gradio workspace plus lightweight vocal, m
 - Conservative master-bus compression, saturation and peak limiting
 - WAV and MIDI export
 - Clear errors instead of crashing the Gradio app
+
+## Optional AI layer
+
+`requirements.txt` stays lightweight for normal development. Neural MIDI transcription is isolated in `requirements-ai.txt` so Colab/server runtimes can opt in without forcing heavy AI dependencies on every install.
+
+The AI MIDI tab exposes Basic Pitch controls for MIDI tempo, minimum/maximum pitch, minimum note length, onset threshold and frame threshold. Basic Pitch's current inference API supports these controls and produces MIDI note events with pitch-bend information. citeturn702647search0turn353018search0
+
+Install the optional layer with:
+
+```bash
+pip install -r requirements-ai.txt
+```
 
 ## Planned AI modules
 
@@ -39,16 +52,23 @@ The project now has a crash-resistant Gradio workspace plus lightweight vocal, m
 
 ## Important implementation note
 
-The current melody, accompaniment, vocal-fix and mix/master modules are lightweight foundations designed for CPU/Colab development. They are not yet equivalent to a commercial neural vocal editor, neural source separator, or AI music generator. Heavy learned models can be added behind the same module interfaces later.
+The current melody, accompaniment, vocal-fix and mix/master modules are lightweight foundations designed for CPU/Colab development. The Basic Pitch backend is an optional neural transcription component, but the overall project is not yet equivalent to a commercial neural vocal editor, neural source separator, or AI music generator. Heavy learned models can be added behind the same module interfaces later.
 
 ## Run in Google Colab
 
-Open `colab/JE_AI_Audio_Studio.ipynb` in Colab, run the setup cell, then launch the app.
+Open `colab/JE_AI_Audio_Studio.ipynb` in Colab, run the cells in order, and the notebook will clone/reset the `main` branch, install the base + optional AI dependencies, run import smoke tests, and launch the Gradio UI with a temporary share URL.
 
 ## Local
 
 ```bash
 pip install -r requirements.txt
+python app.py
+```
+
+For the optional AI MIDI backend:
+
+```bash
+pip install -r requirements-ai.txt
 python app.py
 ```
 
@@ -58,9 +78,11 @@ python app.py
 JE-AI-Audio-Studio/
 ├── app.py
 ├── requirements.txt
+├── requirements-ai.txt
 ├── README.md
 ├── .gitignore
 ├── colab/
+│   └── JE_AI_Audio_Studio.ipynb
 ├── ai/
 ├── vocal/
 ├── separation/
