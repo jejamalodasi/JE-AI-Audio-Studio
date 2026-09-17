@@ -21,6 +21,7 @@ The project now has a crash-resistant Gradio workspace plus lightweight DSP, neu
 - Optional neural AI MIDI transcription with Spotify Basic Pitch
 - **AI Conditioned Arrangement**: vocal-conditioned tempo/key/activity → melody + rhythm + chords + bass + drums
 - **AI Music Generator**: optional MusicGen Melody text + audio-conditioned short music synthesis
+- **AI Song Builder**: section-by-section Intro → Verse → Chorus → Bridge → Outro sketch generation with crossfades, continuity mode, seeds and a remixable ZIP bundle
 - Vocal → Music Parts: rhythm, chords, bass and drums
 - Full multi-track MIDI arrangement rendering
 - General MIDI percussion-name mapping and Channel 10 drum rendering
@@ -52,7 +53,21 @@ The arrangement pipeline analyzes source tempo, chroma/key and onset activity, t
 
 ### AI Music Generator
 
-The optional MusicGen Melody backend uses the Hugging Face Transformers implementation of `facebook/musicgen-melody` to generate short music from a text description plus an audio/melody reference. The current UI exposes generation duration, guidance scale, temperature, top-k, top-p and device controls.
+The optional MusicGen Melody backend uses the Hugging Face Transformers implementation of `facebook/musicgen-melody` to generate short music from a text description plus an audio/melody reference. The current UI exposes generation duration, guidance scale, temperature, top-k, top-p, seed and device controls.
+
+### AI Song Builder
+
+The Song Builder turns one vocal/melody reference into a structured **song sketch** rather than one undifferentiated audio block. Each selected section is generated with its own musical instruction:
+
+- **Intro** — sparse opening and tonal setup
+- **Verse** — restrained support with space for singing
+- **Chorus** — fuller lift and stronger rhythmic energy
+- **Bridge** — contrast and transition toward the ending
+- **Outro** — resolution and gradual release
+
+The sections are crossfaded into a single WAV timeline. `vocal-anchor` keeps the original reference as the conditioning anchor for every section; `chain` feeds the previous generated section into the next section for a more continuous generative chain. The builder also writes a ZIP bundle containing the final sketch, every generated section and a JSON manifest.
+
+The current builder is capped at **90 seconds total** so it behaves as a concept/sketch tool on Colab GPUs rather than pretending to be a full-length production renderer. It does not claim DAW-grade beat-locked continuation or perfect stem continuity.
 
 **Licensing:** Meta's MusicGen model card states that the model weights are released under **CC-BY-NC 4.0**. Treat the bundled MusicGen backend as research/non-commercial unless you substitute a separately licensed model behind the same interface.
 
@@ -83,7 +98,7 @@ The current melody, accompaniment, vocal-fix and mix/master modules are lightwei
 
 Open `colab/JE_AI_Audio_Studio.ipynb` in Colab, run the cells in order, and the notebook will clone/reset the `main` branch, install the base + optional AI dependencies, verify imports, and launch the Gradio UI with a temporary share URL.
 
-For MusicGen generation, use a GPU runtime and start with short durations. The upstream documentation notes that larger MusicGen variants require substantial GPU memory; the small melody model is the intended prototype starting point here.
+For MusicGen generation and Song Builder generation, use a GPU runtime and start with short section durations. The upstream MusicGen documentation describes Melody as text + audio conditioned generation and recommends sampling for practical generation quality. citeturn324295search0
 
 ## Local
 
@@ -117,6 +132,7 @@ JE-AI-Audio-Studio/
 │   ├── musicgen_melody.py
 │   ├── neural_vocal_enhancement.py
 │   ├── pitch_timing_ai.py
+│   ├── song_builder.py
 │   ├── vocal_to_melody.py
 │   └── vocal_to_music.py
 ├── vocal/
