@@ -22,7 +22,11 @@ The project keeps heavyweight neural runtimes optional so the base CPU environme
 
 `arrangement_generator.py` combines the conditioning layer with melody extraction. In `auto` mode it tries Basic Pitch first and falls back to the existing pYIN melody extractor when the optional Basic Pitch backend is not available. The final arrangement is rendered as multi-track MIDI.
 
-This is a modular bridge toward a learned arrangement model; it is not yet an end-to-end neural full-song generator.
+## MusicGen Melody
+
+`musicgen_melody.py` provides an optional Transformers-based `facebook/musicgen-melody` audio-generation backend. It accepts an audio/melody reference plus a text description and generates a short music waveform. The model supports audio-conditioned and text-conditioned generation through the Hugging Face Transformers API.
+
+The bundled MusicGen weights are released under **CC-BY-NC 4.0**, so this backend should be treated as research/non-commercial unless a separately licensed model is substituted behind the same interface.
 
 Install the optional AI stack:
 
