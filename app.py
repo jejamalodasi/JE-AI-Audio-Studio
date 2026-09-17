@@ -8,6 +8,7 @@ import gradio as gr
 
 from ai.arrangement_generator import AIConditionedArrangementConfig, generate_ai_conditioned_arrangement
 from ai.basic_pitch_transcriber import transcribe_with_basic_pitch
+from ai.musicgen_melody import MusicGenConfig, generate_musicgen_melody
 from ai.neural_vocal_enhancement import enhance_vocal_neural
 from ai.pitch_timing_ai import PitchTimingAIConfig, correct_pitch_timing_ai
 from ai.vocal_to_melody import MelodyConfig, vocal_to_melody
@@ -240,6 +241,35 @@ def generate_ai_arrangement(path: Optional[str], bpm_override: float, bars: int,
         return None, None, f"❌ AI arrangement failed: {type(exc).__name__}: {exc}"
 
 
+def generate_musicgen_audio(path: Optional[str], prompt: str, duration: float, guidance: float, temperature: float, top_k: int, top_p: float, device: str):
+    if not path:
+        return None, "Please upload a vocal/melody reference first."
+    try:
+        result = generate_musicgen_melody(
+            path,
+            str(prompt),
+            config=MusicGenConfig(
+                duration_seconds=float(duration),
+                guidance_scale=float(guidance),
+                temperature=float(temperature),
+                top_k=int(top_k),
+                top_p=float(top_p),
+                device=str(device),
+            ),
+        )
+        return result["output_path"], (
+            "### 🎵 AI Music Generator complete\n"
+            f"Backend: **MusicGen Melody / Transformers**\n\n"
+            f"Model: **{result['model']}**\n\n"
+            f"Device: **{result['device']}**\n\n"
+            f"Output: **{result['duration_seconds']:.2f}s @ {result['sampling_rate']:,} Hz**\n\n"
+            "⚠️ The bundled MusicGen weights are CC-BY-NC 4.0. Use a separately licensed model for commercial deployment."
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        return None, f"❌ AI Music generation failed: {type(exc).__name__}: {exc}"
+
+
 def generate_full_arrangement(path: Optional[str], bpm: float, key: str, scale: str, bars: int, fmin: float, fmax: float, seed: int):
     if not path:
         return None, None, "Please upload a vocal file first."
@@ -334,7 +364,7 @@ def build_app():
         gr.Markdown(
             "# 🎚️ JE AI Audio Studio\n"
             "### AI-assisted audio editing & music production\n\n"
-            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Neural Vocal Enhance + Neural Pitch/Timing + AI MIDI + AI Conditioned Arrangement + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
+            "Audio engine + Vocal Fix DSP + Advanced Vocal Fix + Neural Vocal Enhance + Neural Pitch/Timing + AI MIDI + AI Conditioned Arrangement + AI Music Generator + Vocal→MIDI + Full Arrangement + Mix/Master + optional stem separation."
         )
         with gr.Tabs():
             with gr.Tab("🎚️ Audio / Vocal Fix"):
@@ -456,26 +486,32 @@ def build_app():
                     ai_arrange_out = gr.File(label="AI Arrangement MIDI")
                     ai_arrange_melody_out = gr.File(label="AI Melody MIDI")
                 ai_arrange_status = gr.Markdown("This is a modular conditioning pipeline, not yet an end-to-end learned full-song model.")
-                ai_arrange_btn.click(
-                    generate_ai_arrangement,
-                    inputs=[
-                        ai_arrange_in,
-                        ai_arrange_bpm,
-                        ai_arrange_bars,
-                        ai_arrange_key,
-                        ai_arrange_scale,
-                        ai_arrange_backend,
-                        ai_arrange_min_freq,
-                        ai_arrange_max_freq,
-                        ai_arrange_min_note,
-                        ai_arrange_onset,
-                        ai_arrange_frame,
-                        ai_arrange_density_floor,
-                        ai_arrange_density_ceiling,
-                        ai_arrange_swing,
-                        ai_arrange_seed,
-                    ],
-                    outputs=[ai_arrange_out, ai_arrange_melody_out, ai_arrange_status],
+                ai_arrange_btn.click(generate_ai_arrangement, inputs=[ai_arrange_in, ai_arrange_bpm, ai_arrange_bars, ai_arrange_key, ai_arrange_scale, ai_arrange_backend, ai_arrange_min_freq, ai_arrange_max_freq, ai_arrange_min_note, ai_arrange_onset, ai_arrange_frame, ai_arrange_density_floor, ai_arrange_density_ceiling, ai_arrange_swing, ai_arrange_seed], outputs=[ai_arrange_out, ai_arrange_melody_out, ai_arrange_status])
+
+            with gr.Tab("🎵 AI Music Generator"):
+                musicgen_in = gr.Audio(label="Vocal / Melody Reference", type="filepath", sources=["upload", "microphone"])
+                musicgen_prompt = gr.Textbox(
+                    label="Describe the backing music",
+                    lines=3,
+                    value="Bengali folk-inspired acoustic arrangement, warm harmonium, bamboo flute, hand percussion, soft bass, emotional and organic",
+                )
+                with gr.Row():
+                    musicgen_duration = gr.Slider(2, 30, value=8, step=1, label="Generation duration (seconds)")
+                    musicgen_guidance = gr.Slider(1, 6, value=3, step=0.1, label="Guidance scale")
+                    musicgen_temperature = gr.Slider(0.5, 1.5, value=1.0, step=0.05, label="Temperature")
+                with gr.Row():
+                    musicgen_top_k = gr.Slider(0, 500, value=250, step=10, label="Top-K")
+                    musicgen_top_p = gr.Slider(0, 1, value=0, step=0.05, label="Top-P (0 = disabled)")
+                    musicgen_device = gr.Dropdown(["auto", "cpu", "cuda"], value="auto", label="Device")
+                musicgen_btn = gr.Button("🎵 Generate AI Music", variant="primary")
+                musicgen_out = gr.Audio(label="Generated Music", type="filepath")
+                musicgen_status = gr.Markdown(
+                    "MusicGen Melody uses both text and an audio/melody reference. The bundled model weights are CC-BY-NC 4.0; use a separately licensed model for commercial deployment."
+                )
+                musicgen_btn.click(
+                    generate_musicgen_audio,
+                    inputs=[musicgen_in, musicgen_prompt, musicgen_duration, musicgen_guidance, musicgen_temperature, musicgen_top_k, musicgen_top_p, musicgen_device],
+                    outputs=[musicgen_out, musicgen_status],
                 )
 
             with gr.Tab("🎛️ Vocal → Music Parts"):
@@ -541,8 +577,8 @@ def build_app():
 
         gr.Markdown(
             "---\n### 🧠 Engine roadmap\n"
-            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Neural Vocal Enhance backend · ✅ Neural Pitch + Timing · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ AI Conditioned Arrangement · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation\n\n"
-            "Next: **Learned AI music generation/full-song synthesis → production web UI/API → Android client.**"
+            "✅ Audio analysis · ✅ Vocal Fix DSP · ✅ Advanced Vocal Fix · ✅ Neural Vocal Enhance · ✅ Neural Pitch + Timing · ✅ Vocal→Melody/MIDI · ✅ AI MIDI / Basic Pitch · ✅ AI Conditioned Arrangement · ✅ Music Parts · ✅ Stem separation backend · ✅ Full MIDI Arrangement · ✅ Mix/Master foundation · ✅ MusicGen audio-generation backend\n\n"
+            "Next: **learned full-song generation/style conditioning → stronger vocal restoration → production web UI/API → Android client.**"
         )
 
     return demo
