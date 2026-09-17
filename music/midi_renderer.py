@@ -90,13 +90,15 @@ def render_arrangement_midi(
 
     drum_events: list[tuple[float, str, int, int]] = []
     for item in drums or []:
-        raw_note = item.get("note", item.get("midi", item.get("instrument", 36)))
+        # Drum generators may expose the instrument as `drum`, `instrument`,
+        # `note`, or `midi`. Resolve names such as kick/snare/hat to GM notes.
+        raw_note = item.get("drum", item.get("instrument", item.get("note", item.get("midi", 36))))
         _add_note_events(
             drum_events,
             item.get("start", item.get("time", 0.0)),
             item.get("duration", 0.08),
             resolve_drum_note(raw_note),
-            item.get("velocity", 100),
+            int(float(item.get("velocity", 100)) * 127) if 0.0 <= float(item.get("velocity", 100)) <= 1.0 else item.get("velocity", 100),
         )
 
     rhythm_events: list[tuple[float, str, int, int]] = []
