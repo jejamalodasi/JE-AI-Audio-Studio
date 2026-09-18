@@ -174,6 +174,7 @@ function defaultTimeline(
       label: track.label,
       startSec: 0,
       durationSec: total,
+      sourceOffsetSec: 0,
       sourceUri: uri,
       sourcePart,
       fadeInSec: 0,
