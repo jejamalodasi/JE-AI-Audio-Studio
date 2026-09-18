@@ -34,6 +34,12 @@ The project now has a crash-resistant Gradio workspace plus lightweight DSP, neu
 - WAV and MIDI export
 - Clear errors instead of crashing the Gradio app
 
+## Android client
+
+The `mobile/` app is an Expo SDK 57 control surface for the same backend engine. It uploads audio as multipart form data, starts the asynchronous Full AI Song job, polls progress from 0–100%, downloads the final WAV or project ZIP, and can play the downloaded WAV locally.
+
+The client uses the public `EXPO_PUBLIC_API_URL` environment variable for the API base URL. Heavy AI models stay server-side; the Android app does not bundle Python/transformer model weights.
+
 ## Optional AI layer
 
 `requirements.txt` stays lightweight for normal development. The optional `requirements-ai.txt` layer adds the neural backends used by Colab/server workflows.
