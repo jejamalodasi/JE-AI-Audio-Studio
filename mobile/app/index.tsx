@@ -645,7 +645,7 @@ export default function HomeScreen() {
         <TimelineStudio
           jobId={job.job_id}
           config={config}
-          artifacts={localArtifacts}
+          artifacts={localArtifacts ?? {}}
           musicParts={musicParts}
           initialTimeline={timeline}
           trackSettings={trackMix}
@@ -673,7 +673,7 @@ export default function HomeScreen() {
       {completed && job?.job_id ? (
         <MixStudio
           jobId={job.job_id}
-          artifacts={localArtifacts}
+          artifacts={localArtifacts ?? {}}
           vocalGain={config.vocal_gain_db}
           backingGain={config.music_gain_db}
           targetPeak={config.target_peak}
