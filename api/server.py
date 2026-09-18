@@ -243,6 +243,9 @@ def get_song_job(job_id: str) -> JSONResponse:
             "backing": Path(result["backing_path"]).name,
             "bundle": Path(result["bundle_path"]).name,
         }
+        remix = job.get("remix") or {}
+        if remix.get("final_path"):
+            artifact_names["remix"] = Path(remix["final_path"]).name
         job["artifacts"] = {
             name: f"{API_PREFIX}/jobs/{job_id}/download/{kind}"
             for kind, name in artifact_names.items()
