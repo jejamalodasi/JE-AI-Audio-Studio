@@ -556,8 +556,9 @@ function PianoRoll({
               {notes.map((note, index) => {
                 const top = (pitchBounds.max - note.note) * rowHeight;
                 return (
-                  <View
+                  <Pressable
                     key={`${note.note}-${note.startBeat}-${index}`}
+                    onPress={() => setSelectedNote(index)}
                     style={{
                       position: "absolute",
                       left: note.startBeat * beatWidth + 1,
@@ -1025,6 +1026,7 @@ export function TimelineStudio({
       await renderTimeline(jobId, {
         timeline,
         trackMix: trackSettings,
+        bpm: config.bpm ?? 120,
         targetPeak: 0.95,
         compressionRatio: 2,
         saturation: 0.08,
