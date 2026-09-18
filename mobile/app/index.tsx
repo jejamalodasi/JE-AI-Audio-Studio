@@ -355,7 +355,7 @@ export default function HomeScreen() {
                 />
               </View>
               <Text selectable style={{ color: "#8f98aa", fontSize: 12 }}>
-                ${Math.round(job.progress ?? 0)}%
+                {Math.round(job.progress ?? 0)}%
               </Text>
             </View>
           ) : null}
