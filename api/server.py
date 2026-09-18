@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from ai.full_song_pipeline import FullSongPipelineConfig, build_full_song_pipeline
 from ai.song_builder import SongSection
+from music.part_export import build_music_part_midi_bundle
 from mixing.mastering import MasteringConfig, master_audio
 from mixing.mixer import mix_audio_arrays
 from utils.audio_utils import load_audio, save_wav
