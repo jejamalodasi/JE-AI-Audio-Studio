@@ -641,6 +641,10 @@ export default function HomeScreen() {
         <AudioPreview uri={localArtifacts.final} />
       ) : null}
 
+      {localArtifacts?.timeline && new File(localArtifacts.timeline).exists ? (
+        <AudioPreview uri={localArtifacts.timeline} />
+      ) : null}
+
       {completed && job?.job_id ? (
         <TimelineStudio
           jobId={job.job_id}
@@ -665,6 +669,11 @@ export default function HomeScreen() {
                 loadProjects().then(setProjects),
               );
             }
+          }}
+          onTimelineRendered={(uri) => {
+            const nextArtifacts = { ...localArtifacts, timeline: uri };
+            setLocalArtifacts(nextArtifacts);
+            void persistHistory(job, nextArtifacts, musicParts, trackMix, timeline);
           }}
           onMessage={setMessage}
         />
