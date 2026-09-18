@@ -7,7 +7,7 @@
     "scheme": "jeai",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "plugins": ["expo-router", "expo-document-picker", "expo-audio"],
+    "plugins": ["expo-router", "expo-document-picker", "expo-audio", "expo-sharing"],
     "android": {
       "package": "com.jejamalodasi.jeaiaudiostudio",
       "versionCode": 1
