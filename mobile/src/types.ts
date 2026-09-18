@@ -62,7 +62,7 @@ export type TimelineClipKind = "audio" | "midi";
 
 export type TimelineClip = {
   id: string;
-  trackId: "vocal" | "backing" | "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement";
+  trackId: "vocal" | "backing" | "melody" | "chords" | "bass" | "drums" | "rhythm";
   kind: TimelineClipKind;
   label: string;
   startSec: number;
@@ -70,7 +70,7 @@ export type TimelineClip = {
   sourceOffsetSec: number;
   sourceUri?: string;
   sourceArtifact?: "vocal" | "backing";
-  sourcePart?: "melody" | "chords" | "bass" | "drums" | "rhythm";
+  sourcePart?: "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement";
   fadeInSec: number;
   fadeOutSec: number;
 };
