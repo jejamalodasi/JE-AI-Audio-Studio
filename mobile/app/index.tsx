@@ -224,7 +224,12 @@ export default function HomeScreen() {
         setProjectId(draft.id);
         setCreatedAt(draft.createdAt);
         setFile(draft.source ?? null);
-        setConfig(draft.config);
+        setConfig({
+          ...DEFAULT_CONFIG,
+          ...draft.config,
+          sections: draft.config.sections?.length ? draft.config.sections : DEFAULT_CONFIG.sections,
+          max_total_seconds: draft.config.max_total_seconds ?? DEFAULT_CONFIG.max_total_seconds,
+        });
         setJob(draft.job ?? null);
         setLocalArtifacts(draft.localArtifacts ?? {});
 
@@ -422,7 +427,12 @@ export default function HomeScreen() {
   async function openProject(saved: LocalProject) {
     setProjectId(saved.id);
     setCreatedAt(saved.createdAt);
-    setConfig(saved.config);
+    setConfig({
+      ...DEFAULT_CONFIG,
+      ...saved.config,
+      sections: saved.config.sections?.length ? saved.config.sections : DEFAULT_CONFIG.sections,
+      max_total_seconds: saved.config.max_total_seconds ?? DEFAULT_CONFIG.max_total_seconds,
+    });
     setJob(saved.job ?? null);
     setLocalArtifacts(saved.localArtifacts ?? {});
 
