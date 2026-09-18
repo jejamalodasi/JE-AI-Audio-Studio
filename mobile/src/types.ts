@@ -18,7 +18,19 @@ export type SongJob = {
     remix?: string;
   };
   musicParts?: Partial<Record<"melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement", string>>;
+  trackMix?: TrackMixSettings;
 };
+
+export type TrackMixState = {
+  volume: number;
+  muted: boolean;
+  solo: boolean;
+};
+
+export type TrackMixSettings = Partial<Record<
+  "vocal" | "backing" | "melody" | "chords" | "bass" | "drums" | "rhythm",
+  TrackMixState
+>>;
 
 export type SongConfig = {
   base_prompt: string;
