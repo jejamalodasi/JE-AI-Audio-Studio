@@ -88,3 +88,9 @@ export type TimelineState = {
   playheadSec: number;
   zoom: number;
 };
+
+export type TimelineRenderResult = {
+  job_id: string;
+  status: "completed";
+  filename: string;
+};
