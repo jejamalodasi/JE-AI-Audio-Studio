@@ -193,6 +193,7 @@ export async function downloadClipEdit(
   editId: string,
   extension = "wav",
 ) {
+  requireApiUrl();
   const exportDirectory = new Directory(Paths.document, "exports");
   exportDirectory.create({ idempotent: true, intermediates: true });
 
