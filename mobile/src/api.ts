@@ -58,6 +58,7 @@ export async function getSongJob(jobId: string): Promise<SongJob> {
 }
 
 export type ArtifactKind =
+  | "timeline"
   | "final"
   | "vocal"
   | "backing"
@@ -194,6 +195,25 @@ export async function editSongClip(
   );
   if (!response.ok) throw await parseError(response);
   return response.json();
+}
+
+export async function downloadMidiEdit(
+  jobId: string,
+  part: "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement",
+  extension = "mid",
+) {
+  requireApiUrl();
+  const exportDirectory = new Directory(Paths.document, "exports");
+  exportDirectory.create({ idempotent: true, intermediates: true });
+
+  const filename = `je_ai_midi_${encodeURIComponent(part)}_${Date.now()}.${extension}`;
+  const destination = new File(exportDirectory, filename);
+  const downloaded = await File.downloadFileAsync(
+    `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/download/midi-${encodeURIComponent(part)}`,
+    destination,
+    { idempotent: true },
+  );
+  return downloaded.uri;
 }
 
 export async function downloadClipEdit(
