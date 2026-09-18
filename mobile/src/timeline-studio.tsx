@@ -7,7 +7,9 @@ import {
   artifactUrl,
   downloadArtifact,
   downloadClipEdit,
+  downloadMidiEdit,
   editSongClip,
+  saveMidiEdits,
   generateMusicParts,
   getMidiNotes,
 } from "./api";
@@ -366,14 +368,18 @@ function PianoRoll({
   jobId,
   clip,
   bpm,
+  onSaved,
 }: {
   jobId: string;
   clip: TimelineClip;
   bpm: number;
+  onSaved: (uri: string, part: NonNullable<TimelineClip["sourcePart"]>) => void;
 }) {
   const [notes, setNotes] = useState<MidiNote[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedNote, setSelectedNote] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -400,6 +406,54 @@ function PianoRoll({
       active = false;
     };
   }, [clip.id, clip.sourcePart, jobId]);
+
+  function updateSelectedNote(patch: Partial<MidiNote>) {
+    if (selectedNote === null) return;
+    setNotes((current) =>
+      current.map((note, index) => (index === selectedNote ? { ...note, ...patch } : note)),
+    );
+  }
+
+  function deleteSelectedNote() {
+    if (selectedNote === null) return;
+    setNotes((current) => current.filter((_, index) => index !== selectedNote));
+    setSelectedNote(null);
+  }
+
+  function duplicateSelectedNote() {
+    if (selectedNote === null) return;
+    setNotes((current) => {
+      const source = current[selectedNote];
+      if (!source) return current;
+      const copy = { ...source, startBeat: source.startBeat + Math.max(0.25, source.durationBeat) };
+      return [...current, copy].sort((a, b) => a.startBeat - b.startBeat || a.note - b.note);
+    });
+  }
+
+  async function persistNotes() {
+    if (!clip.sourcePart || saving) return;
+    setSaving(true);
+    try {
+      const result = await saveMidiEdits(jobId, {
+        part: clip.sourcePart,
+        notes: notes.map((note) => ({
+          note: Math.round(clamp(note.note, 0, 127)),
+          velocity: Math.round(clamp(note.velocity, 1, 127)),
+          startBeat: Math.max(0, note.startBeat),
+          durationBeat: Math.max(0.01, note.durationBeat),
+        })),
+        bpm,
+      });
+      const uri = await downloadMidiEdit(jobId, clip.sourcePart);
+      onSaved(uri, clip.sourcePart);
+      setSelectedNote(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save MIDI edits.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const pitchBounds = useMemo(() => {
     if (!notes.length) return { min: 48, max: 72 };
@@ -510,7 +564,7 @@ function PianoRoll({
                       borderRadius: 3,
                       backgroundColor: "#8792a4",
                       borderWidth: 1,
-                      borderColor: "#b9c1ce",
+                      borderColor: selectedNote === index ? "#ffffff" : "#b9c1ce",
                     }}
                   />
                 );
@@ -535,6 +589,34 @@ function PianoRoll({
           </ScrollView>
         </View>
       )}
+
+      {!loading && !error && notes.length ? (
+        <View style={{ borderTopWidth: 1, borderTopColor: "#202633", padding: 12, gap: 8 }}>
+          <Text selectable style={{ color: "#7f899a", fontSize: 9, fontWeight: "900" }}>
+            NOTE EDITOR
+          </Text>
+          {selectedNote === null ? (
+            <Text selectable style={{ color: "#5f6979", fontSize: 10 }}>
+              Tap a note, then adjust pitch/duration or delete it.
+            </Text>
+          ) : (
+            <>
+              <Text selectable style={{ color: "#dce2ea", fontSize: 11, fontWeight: "800" }}>
+                {noteName(notes[selectedNote]?.note ?? 60)} · beat {(notes[selectedNote]?.startBeat ?? 0).toFixed(2)}
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                <Button label="Pitch −" onPress={() => updateSelectedNote({ note: (notes[selectedNote]?.note ?? 60) - 1 })} />
+                <Button label="Pitch +" onPress={() => updateSelectedNote({ note: (notes[selectedNote]?.note ?? 60) + 1 })} />
+                <Button label="Length −" onPress={() => updateSelectedNote({ durationBeat: Math.max(0.05, (notes[selectedNote]?.durationBeat ?? 0.25) - 0.25) })} />
+                <Button label="Length +" onPress={() => updateSelectedNote({ durationBeat: (notes[selectedNote]?.durationBeat ?? 0.25) + 0.25 })} />
+                <Button label="Duplicate Note" onPress={duplicateSelectedNote} />
+                <Button label="Delete Note" onPress={deleteSelectedNote} />
+                <Button label={saving ? "Saving…" : "Save MIDI"} disabled={saving} active={!saving} onPress={() => void persistNotes()} />
+              </View>
+            </>
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1213,7 +1295,16 @@ export function TimelineStudio({
       )}
 
       {selectedClip?.kind === "midi" && selectedClip.sourcePart ? (
-        <PianoRoll jobId={jobId} clip={selectedClip} bpm={config.bpm ?? 120} />
+        <PianoRoll
+          jobId={jobId}
+          clip={selectedClip}
+          bpm={config.bpm ?? 120}
+          onSaved={(uri, part) => {
+            onMusicPartsChange({ ...musicParts, [part]: uri });
+            updateClip(selectedClip.id, { sourceUri: uri });
+            onMessage(`✅ ${part} MIDI edits saved locally.`);
+          }}
+        />
       ) : null}
 
       <View style={{ gap: 8 }}>
