@@ -60,6 +60,8 @@ GET /api/jobs/{job_id}
 GET /api/jobs/{job_id}/download/final
 GET /api/jobs/{job_id}/download/vocal
 GET /api/jobs/{job_id}/download/backing
+POST /api/jobs/{job_id}/remix
+GET /api/jobs/{job_id}/download/remix
 GET /api/jobs/{job_id}/download/bundle
 
 The song creation call uses multipart form data and returns a job ID with HTTP 202.
@@ -81,10 +83,18 @@ The Android client now exposes the main Full AI Song configuration directly in t
 
 The selected configuration is part of the locally saved project, so opening a saved project restores its studio settings.
 
+## Stem / Mix Studio
+
+Completed jobs can be opened in the mobile Mix Studio to preview the final master, cleaned vocal, AI backing and latest remix independently. Each local player has monitor volume and mute controls.
+
+The Remix Bus can re-render the completed vocal + backing stems with new vocal gain, backing gain, target peak, compression ratio and saturation settings. This does not regenerate the AI backing, so remix iterations are much lighter than a full song generation.
+
+Native file sharing is provided through expo-sharing on Android/iOS.
+
 ## Roadmap
 
-- stem/mix controls
-- share/export actions
+- true multi-stem separation/more tracks
+- richer mix automation
 - durable cloud projects + authentication
 - multi-device sync
 - EAS Update delivery
