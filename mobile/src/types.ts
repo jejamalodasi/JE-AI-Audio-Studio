@@ -38,4 +38,5 @@ export type SongConfig = {
   compression_ratio: number;
   saturation: number;
   device: "auto" | "cpu" | "cuda";
+  max_total_seconds: number;
 };
