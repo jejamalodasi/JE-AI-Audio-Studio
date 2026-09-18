@@ -1,3 +1,4 @@
+import type { Dispatch, SetStateAction } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
 import type { SongConfig } from "./types";
@@ -118,7 +119,7 @@ export function StudioControls({
   setConfig,
 }: {
   config: SongConfig;
-  setConfig: React.Dispatch<React.SetStateAction<SongConfig>>;
+  setConfig: Dispatch<SetStateAction<SongConfig>>;
 }) {
   const totalSeconds = config.sections.reduce((sum, section) => sum + Math.max(0, section.duration_seconds), 0);
   const available = SECTION_PRESETS.filter(
@@ -162,6 +163,30 @@ export function StudioControls({
 
   return (
     <View style={{ gap: 14 }}>
+      <View style={{ gap: 8 }}>
+        <Text selectable style={{ color: "#f5f7fb", fontSize: 17, fontWeight: "800" }}>
+          02 · AI Song Direction
+        </Text>
+        <TextInput
+          multiline
+          value={config.base_prompt}
+          onChangeText={(base_prompt) => setConfig((current) => ({ ...current, base_prompt }))}
+          placeholder="Describe the style, instruments, mood and production…"
+          placeholderTextColor="#626c7d"
+          style={{
+            minHeight: 100,
+            borderRadius: 14,
+            backgroundColor: "#0e1117",
+            color: "#f5f7fb",
+            padding: 14,
+            textAlignVertical: "top",
+            borderWidth: 1,
+            borderColor: "#242b38",
+            lineHeight: 20,
+          }}
+        />
+      </View>
+
       <View style={{ gap: 6 }}>
         <Text selectable style={{ color: "#f5f7fb", fontSize: 17, fontWeight: "800" }}>
           02 · Song Structure
@@ -291,12 +316,16 @@ export function StudioControls({
           <Field
             label="BPM"
             value={config.bpm == null ? "" : String(config.bpm)}
-            onChangeText={(value) =>
-              setConfig((current) => ({
-                ...current,
-                bpm: value.trim() === "" ? null : Number(value),
-              }))
-            }
+            onChangeText={(value) => {
+              if (value.trim() === "") {
+                setConfig((current) => ({ ...current, bpm: null }));
+                return;
+              }
+              const next = Number(value);
+              if (Number.isFinite(next)) {
+                setConfig((current) => ({ ...current, bpm: Math.max(40, Math.min(240, Math.round(next))) }));
+              }
+            }}
             keyboardType="numeric"
           />
           <Field
