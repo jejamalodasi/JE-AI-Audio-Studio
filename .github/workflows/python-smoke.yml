@@ -7,6 +7,23 @@ on:
     branches: [main]
 
 jobs:
+  api:
+    name: API service smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install API dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-api.txt
+      - name: Import API service
+        run: python -c "from api.server import app; print('✅ API import:', app.title)"
+
   smoke:
     runs-on: ubuntu-latest
     steps:
@@ -23,7 +40,7 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Compile Python sources
-        run: python -m compileall -q ai vocal music mixing separation utils app.py
+        run: python -m compileall -q api ai vocal music mixing separation utils app.py
 
       - name: Import smoke test
         run: |
