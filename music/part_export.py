@@ -58,7 +58,7 @@ def build_music_part_midi_bundle(
         "chords": copy_track("Chords", 2, "chords.mid"),
         "bass": copy_track("Bass", 3, "bass.mid"),
         "drums": copy_track("Drums", 4, "drums.mid"),
-        "rhythm": copy_track("Rhythm", 6, "rhythm.mid"),
+        "rhythm": copy_track("Rhythm", 5, "rhythm.mid"),
         "arrangement": str(result["arrangement_midi_path"]),
     }
 
