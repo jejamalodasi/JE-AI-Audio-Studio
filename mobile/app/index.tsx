@@ -19,6 +19,7 @@ import {
   getSongJob,
   healthCheck,
 } from "../src/api";
+import { StudioControls } from "../src/studio-controls";
 import {
   clearDraft,
   loadDraft,
@@ -489,31 +490,7 @@ export default function HomeScreen() {
         <ActionButton label="Test API Connection" onPress={runHealth} secondary />
       </Card>
 
-      <Card>
-        <Text selectable style={{ color: "#f5f7fb", fontSize: 17, fontWeight: "800" }}>
-          02 · AI Song Direction
-        </Text>
-        <TextInput
-          multiline
-          value={config.base_prompt}
-          onChangeText={(base_prompt) => setConfig((current) => ({ ...current, base_prompt }))}
-          placeholder="Describe the style…"
-          placeholderTextColor="#626c7d"
-          style={{
-            minHeight: 100,
-            borderRadius: 14,
-            backgroundColor: "#0e1117",
-            color: "#f5f7fb",
-            padding: 14,
-            textAlignVertical: "top",
-            borderWidth: 1,
-            borderColor: "#242b38",
-          }}
-        />
-        <Text selectable style={{ color: "#9da6b5", fontSize: 13, lineHeight: 19 }}>
-          Structure: Intro 4s · Verse 8s · Chorus 10s · Bridge 6s · Outro 6s
-        </Text>
-      </Card>
+      <StudioControls config={config} setConfig={setConfig} />
 
       <Card>
         <Text selectable style={{ color: "#f5f7fb", fontSize: 17, fontWeight: "800" }}>
