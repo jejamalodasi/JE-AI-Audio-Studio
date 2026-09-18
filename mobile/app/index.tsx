@@ -179,6 +179,7 @@ export default function HomeScreen() {
   const [busy, setBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumedJobId = useRef<string | null>(null);
 
   function projectSnapshot(
     nextJob: SongJob | undefined = job ?? undefined,
@@ -259,6 +260,16 @@ export default function HomeScreen() {
 
     return () => clearTimeout(timer);
   }, [hydrated, file, config, job, localArtifacts, projectId, createdAt]);
+
+  useEffect(() => {
+    if (!hydrated || !job || busy) return;
+    if (job.status !== "queued" && job.status !== "running") return;
+    if (resumedJobId.current === job.job_id) return;
+
+    resumedJobId.current = job.job_id;
+    setBusy(true);
+    pollJob(job.job_id);
+  }, [hydrated, job?.job_id, job?.status, busy]);
 
   const completed = job?.status === "completed";
   const running = job?.status === "queued" || job?.status === "running";
