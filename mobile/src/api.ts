@@ -1,5 +1,5 @@
 import { Directory, File, Paths } from "expo-file-system";
-import type { PickedAudio, SongConfig, SongJob } from "./types";
+import type { MidiNote, PickedAudio, SongConfig, SongJob } from "./types";
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/$/, "");
 
@@ -205,4 +205,17 @@ export async function downloadClipEdit(
     { idempotent: true },
   );
   return downloaded.uri;
+}
+
+
+export async function getMidiNotes(
+  jobId: string,
+  part: "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement",
+): Promise<{ part: string; ticksPerBeat: number; notes: MidiNote[] }> {
+  requireApiUrl();
+  const response = await fetch(
+    `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/midi/${encodeURIComponent(part)}`,
+  );
+  if (!response.ok) throw await parseError(response);
+  return response.json();
 }
