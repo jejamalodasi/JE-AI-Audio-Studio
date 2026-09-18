@@ -15,6 +15,7 @@ export type SongJob = {
     vocal: string;
     backing: string;
     bundle: string;
+    remix?: string;
   };
 };
 
