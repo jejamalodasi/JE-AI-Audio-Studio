@@ -64,10 +64,25 @@ GET /api/jobs/{job_id}/download/bundle
 
 The song creation call uses multipart form data and returns a job ID with HTTP 202.
 
+## Current Studio controls
+
+The Android client now exposes the main Full AI Song configuration directly in the UI:
+
+- AI style prompt
+- section add/remove/reorder
+- per-section duration control with a 90-second guard
+- vocal cleanup: Off / Basic / Advanced
+- BPM, key, scale and continuity
+- crossfade
+- generation guidance, temperature, Top-K, Top-P and seed
+- vocal/music gain
+- compression, saturation and target peak
+- engine selection: Auto / CUDA / CPU
+
+The selected configuration is part of the locally saved project, so opening a saved project restores its studio settings.
+
 ## Roadmap
 
-- richer section controls and per-section duration editing
-- full generation/master settings
 - stem/mix controls
 - share/export actions
 - durable cloud projects + authentication
