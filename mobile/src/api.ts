@@ -71,3 +71,40 @@ export async function downloadArtifact(
   );
   return downloaded.uri;
 }
+
+
+export type RemixResult = {
+  job_id: string;
+  status: "completed";
+  remix_path: string;
+  filename: string;
+};
+
+export async function remixSongJob(
+  jobId: string,
+  values: {
+    vocal_gain_db: number;
+    backing_gain_db: number;
+    target_peak: number;
+    compression_ratio: number;
+    saturation: number;
+  },
+): Promise<RemixResult> {
+  requireApiUrl();
+  const form = new FormData();
+  form.append("vocal_gain_db", String(values.vocal_gain_db));
+  form.append("backing_gain_db", String(values.backing_gain_db));
+  form.append("target_peak", String(values.target_peak));
+  form.append("compression_ratio", String(values.compression_ratio));
+  form.append("saturation", String(values.saturation));
+
+  const response = await fetch(
+    `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/remix`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}
