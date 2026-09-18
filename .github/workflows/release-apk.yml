@@ -1,0 +1,77 @@
+name: Build Release APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "release-*"
+
+permissions:
+  contents: read
+
+jobs:
+  release-apk:
+    name: EAS Android Release APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package.json
+
+      - name: Check Expo token
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error title=Missing EXPO_TOKEN::Add the Expo access token as the EXPO_TOKEN GitHub repository secret."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build signed release APK with EAS
+        run: |
+          set -euo pipefail
+          npx eas-cli@latest build --platform android --profile release --non-interactive --wait --json > eas-build.json
+          cat eas-build.json
+
+      - name: Read EAS build ID
+        id: eas-build
+        run: |
+          BUILD_ID="$(python -c 'import json; d=json.load(open("eas-build.json")); d=d[0] if isinstance(d,list) else d; print(d["id"])' )"
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "EAS build: $BUILD_ID"
+
+      - name: Download APK
+        run: |
+          set -euo pipefail
+          mkdir -p ../release-apk
+          npx eas-cli@latest build:download --build-id "${{ steps.eas-build.outputs.build_id }}" --non-interactive
+          APK="$(find . -maxdepth 2 -type f -name "*.apk" | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "::error title=APK missing::EAS build completed but the APK could not be downloaded."
+            exit 1
+          fi
+          cp "$APK" ../release-apk/JE-AI-Audio-Studio-release.apk
+          ls -lh ../release-apk/JE-AI-Audio-Studio-release.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JE-AI-Audio-Studio-release-apk
+          path: mobile/release-apk/JE-AI-Audio-Studio-release.apk
+          if-no-files-found: error
