@@ -8,7 +8,6 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,6 +35,7 @@ import type {
   PickedAudio,
   SongConfig,
   SongJob,
+  TimelineState,
   TrackMixSettings,
 } from "../src/types";
 
@@ -186,6 +186,7 @@ export default function HomeScreen() {
   const [localArtifacts, setLocalArtifacts] = useState<LocalProject["localArtifacts"]>({});
   const [musicParts, setMusicParts] = useState<MusicPartFiles>({});
   const [trackMix, setTrackMix] = useState<TrackMixSettings>({});
+  const [timeline, setTimeline] = useState<TimelineState | undefined>(undefined);
   const [projectId, setProjectId] = useState(newProjectId());
   const [createdAt, setCreatedAt] = useState(new Date().toISOString());
   const [message, setMessage] = useState("Select a vocal, then build your song.");
@@ -199,6 +200,7 @@ export default function HomeScreen() {
     nextArtifacts = localArtifacts,
     nextMusicParts = musicParts,
     nextTrackMix = trackMix,
+    nextTimeline = timeline,
   ): LocalProject {
     const now = new Date().toISOString();
     return {
@@ -212,14 +214,24 @@ export default function HomeScreen() {
       localArtifacts: nextArtifacts,
       musicParts: nextMusicParts,
       trackMix: nextTrackMix,
+      timeline: nextTimeline,
     };
   }
 
   async function persistHistory(
     nextJob: SongJob | undefined = job ?? undefined,
     nextArtifacts = localArtifacts,
+    nextMusicParts = musicParts,
+    nextTrackMix = trackMix,
+    nextTimeline = timeline,
   ) {
-    const snapshot = projectSnapshot(nextJob, nextArtifacts);
+    const snapshot = projectSnapshot(
+      nextJob,
+      nextArtifacts,
+      nextMusicParts,
+      nextTrackMix,
+      nextTimeline,
+    );
     await upsertProject(snapshot);
     const nextProjects = await loadProjects();
     setProjects(nextProjects);
@@ -248,6 +260,7 @@ export default function HomeScreen() {
         setLocalArtifacts(draft.localArtifacts ?? {});
         setMusicParts(draft.musicParts ?? {});
         setTrackMix(draft.trackMix ?? {});
+        setTimeline(draft.timeline);
 
         const sourceUri = draft.source?.uri;
         const sourceExists = sourceUri ? new File(sourceUri).exists : false;
@@ -283,7 +296,17 @@ export default function HomeScreen() {
     }, 450);
 
     return () => clearTimeout(timer);
-  }, [hydrated, file, config, job, localArtifacts, projectId, createdAt]);
+  }, [hydrated, file, config, job, localArtifacts, musicParts, trackMix, timeline, projectId, createdAt]);
+
+  useEffect(() => {
+    if (!hydrated || !timeline || !job || job.status !== "completed") return;
+
+    const timer = setTimeout(() => {
+      void upsertProject(projectSnapshot()).then(() => loadProjects().then(setProjects));
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [hydrated, timeline, job, file, config, localArtifacts, musicParts, trackMix, projectId, createdAt]);
 
   useEffect(() => {
     if (!hydrated || !job || busy) return;
@@ -344,6 +367,7 @@ export default function HomeScreen() {
       setLocalArtifacts({});
       setMusicParts({});
       setTrackMix({});
+      setTimeline(undefined);
       setMessage("✅ Reference copied to persistent app storage. Draft auto-save is on.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not select and save the file.");
@@ -366,7 +390,7 @@ export default function HomeScreen() {
       try {
         const next = await getSongJob(jobId);
         setJob(next);
-        void persistHistory(next, localArtifacts);
+        void persistHistory(next, localArtifacts, musicParts, trackMix, timeline);
 
         if (next.status === "completed") {
           setBusy(false);
@@ -404,6 +428,7 @@ export default function HomeScreen() {
     setJob(null);
     setLocalArtifacts({});
     setMusicParts({});
+    setTimeline(undefined);
     setMessage("Uploading reference…");
 
     try {
@@ -414,7 +439,7 @@ export default function HomeScreen() {
         progress: 0,
       };
       setJob(createdJob);
-      await persistHistory(createdJob, {});
+      await persistHistory(createdJob, {}, {}, trackMix, undefined);
       setMessage(`Job ${created.job_id.slice(0, 8)} queued and saved locally…`);
       pollJob(created.job_id);
     } catch (error) {
@@ -434,7 +459,7 @@ export default function HomeScreen() {
       const uri = await downloadArtifact(job.job_id, artifact, extension);
       const nextArtifacts = { ...localArtifacts, [artifact]: uri };
       setLocalArtifacts(nextArtifacts);
-      await persistHistory(job, nextArtifacts);
+      await persistHistory(job, nextArtifacts, musicParts, trackMix, timeline);
       if (artifact === "final") setMessage("✅ Final master saved to device.");
       else if (artifact === "bundle") setMessage("✅ Project ZIP saved to device.");
       else setMessage(`✅ ${artifact} audio saved to device.`);
@@ -456,6 +481,7 @@ export default function HomeScreen() {
     setLocalArtifacts(saved.localArtifacts ?? {});
     setMusicParts(saved.musicParts ?? {});
     setTrackMix(saved.trackMix ?? {});
+    setTimeline(saved.timeline);
 
     if (saved.source?.uri && new File(saved.source.uri).exists) {
       setFile(saved.source);
@@ -483,6 +509,7 @@ export default function HomeScreen() {
       setLocalArtifacts({});
       setMusicParts({});
       setTrackMix({});
+      setTimeline(undefined);
       setFile(null);
       setConfig(DEFAULT_CONFIG);
       setProjectId(newProjectId());
@@ -620,11 +647,13 @@ export default function HomeScreen() {
           config={config}
           artifacts={localArtifacts}
           musicParts={musicParts}
+          initialTimeline={timeline}
           trackSettings={trackMix}
+          onTimelineChange={setTimeline}
           onTrackSettingsChange={(settings) => {
             setTrackMix(settings);
             if (hydrated) {
-              void upsertProject(projectSnapshot(job, localArtifacts, musicParts, settings)).then(() =>
+              void upsertProject(projectSnapshot(job, localArtifacts, musicParts, settings, timeline)).then(() =>
                 loadProjects().then(setProjects),
               );
             }
@@ -632,7 +661,7 @@ export default function HomeScreen() {
           onMusicPartsChange={(parts) => {
             setMusicParts(parts);
             if (hydrated) {
-              void upsertProject(projectSnapshot(job, localArtifacts, parts, trackMix)).then(() =>
+              void upsertProject(projectSnapshot(job, localArtifacts, parts, trackMix, timeline)).then(() =>
                 loadProjects().then(setProjects),
               );
             }
@@ -653,7 +682,7 @@ export default function HomeScreen() {
           onRemixSaved={(uri) => {
             const nextArtifacts = { ...localArtifacts, remix: uri };
             setLocalArtifacts(nextArtifacts);
-            void persistHistory(job, nextArtifacts);
+            void persistHistory(job, nextArtifacts, musicParts, trackMix, timeline);
           }}
           onMessage={setMessage}
         />
