@@ -106,6 +106,20 @@ function totalSeconds(config: SongConfig) {
   );
 }
 
+function normalizeTimeline(timeline: TimelineState): TimelineState {
+  return {
+    ...timeline,
+    playheadSec: Number.isFinite(timeline.playheadSec) ? timeline.playheadSec : 0,
+    zoom: Number.isFinite(timeline.zoom) ? clamp(timeline.zoom, MIN_ZOOM, MAX_ZOOM) : 48,
+    clips: timeline.clips.map((clip) => ({
+      ...clip,
+      sourceOffsetSec: Number.isFinite(clip.sourceOffsetSec) ? clip.sourceOffsetSec : 0,
+      fadeInSec: Number.isFinite(clip.fadeInSec) ? clip.fadeInSec : 0,
+      fadeOutSec: Number.isFinite(clip.fadeOutSec) ? clip.fadeOutSec : 0,
+    })),
+  };
+}
+
 function defaultTimeline(
   config: SongConfig,
   artifacts: { vocal?: string; backing?: string },
@@ -549,7 +563,7 @@ export function TimelineStudio({
   onMessage: (message: string) => void;
 }) {
   const [timeline, setTimeline] = useState<TimelineState>(
-    () => initialTimeline ?? defaultTimeline(config, artifacts, musicParts),
+    () => normalizeTimeline(initialTimeline ?? defaultTimeline(config, artifacts, musicParts)),
   );
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [buildingParts, setBuildingParts] = useState(false);
@@ -579,7 +593,7 @@ export function TimelineStudio({
   }, [playback.currentTime, playback.playing, config]);
 
   useEffect(() => {
-    if (initialTimeline) setTimeline(initialTimeline);
+    if (initialTimeline) setTimeline(normalizeTimeline(initialTimeline));
   }, [initialTimeline]);
 
   useEffect(() => {
