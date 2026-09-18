@@ -91,9 +91,32 @@ The Remix Bus can re-render the completed vocal + backing stems with new vocal g
 
 Native file sharing is provided through expo-sharing on Android/iOS.
 
+## Multi-Track Timeline
+
+Completed jobs can now open a timeline with:
+
+- Vocal and AI Backing audio lanes
+- Melody, Chords, Bass, Drums and Rhythm MIDI lanes
+- section-based visual clip blocks using the same arrangement structure
+- per-track monitor volume, mute and solo state saved with the local project
+- one-tap generation of independent MIDI part files
+- MIDI sharing from the device
+
+The current musical-part engine exports **real MIDI files**, not synthesized audio stems. This is intentional: it keeps the current implementation honest and lightweight. Audio synthesis for those separate parts needs a dedicated instrument/sampler or a separately licensed generative backend.
+
+The API adds:
+
+POST /api/jobs/{job_id}/parts
+GET  /api/jobs/{job_id}/download/melody
+GET  /api/jobs/{job_id}/download/chords
+GET  /api/jobs/{job_id}/download/bass
+GET  /api/jobs/{job_id}/download/drums
+GET  /api/jobs/{job_id}/download/rhythm
+GET  /api/jobs/{job_id}/download/arrangement
+
 ## Roadmap
 
-- true multi-stem separation/more tracks
+- true multi-stem audio synthesis/separation
 - richer mix automation
 - durable cloud projects + authentication
 - multi-device sync
