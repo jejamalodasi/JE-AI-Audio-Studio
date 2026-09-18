@@ -55,6 +55,7 @@ const DEFAULT_CONFIG: SongConfig = {
   compression_ratio: 2,
   saturation: 0.08,
   device: "auto",
+  max_total_seconds: 90,
 };
 
 function newProjectId() {
@@ -273,6 +274,12 @@ export default function HomeScreen() {
     pollJob(job.job_id);
   }, [hydrated, job?.job_id, job?.status, busy]);
 
+  const totalDurationSeconds = config.sections.reduce(
+    (sum, section) => sum + Math.max(0, section.duration_seconds),
+    0,
+  );
+  const overDurationLimit = totalDurationSeconds > config.max_total_seconds;
+
   const completed = job?.status === "completed";
   const running = job?.status === "queued" || job?.status === "running";
 
@@ -363,6 +370,10 @@ export default function HomeScreen() {
   async function buildSong() {
     if (!file) {
       setMessage("Choose a vocal/audio file first.");
+      return;
+    }
+    if (overDurationLimit) {
+      setMessage(`Reduce the arrangement to ${config.max_total_seconds} seconds or less before building.`);
       return;
     }
 
@@ -504,7 +515,11 @@ export default function HomeScreen() {
             </Text>
           </View>
         ) : (
-          <ActionButton label="🚀 Build Full AI Song" onPress={buildSong} disabled={busy} />
+          <ActionButton
+            label={overDurationLimit ? "Fix Arrangement Length" : "🚀 Build Full AI Song"}
+            onPress={buildSong}
+            disabled={busy || overDurationLimit}
+          />
         )}
         <Text selectable style={{ color: "#8f98aa", fontSize: 13, lineHeight: 19 }}>
           Heavy AI runs on the configured server/GPU backend. The Android app is the control surface.
