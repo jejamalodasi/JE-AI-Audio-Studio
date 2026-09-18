@@ -103,6 +103,34 @@ pip install -r requirements-ai.txt
 
 The current melody, accompaniment, vocal-fix and mix/master modules are lightweight foundations. The neural backends are real optional model integrations, but this project is not yet equivalent to a commercial neural vocal editor, neural source separator, or end-to-end AI music generator. Heavy learned models remain behind modular interfaces so stronger or differently licensed models can be added later.
 
+## Timeline + MIDI render testing
+
+The timeline editor now supports a real render path for both audio clips and MIDI clips. MIDI clips are rendered server-side with the built-in lightweight synthesizer and mixed with the audio clips into a new WAV. Edited MIDI takes precedence over the original generated MIDI.
+
+### Test 1 — backend render in Colab
+
+After cloning/resetting `main` in the Colab notebook, run:
+
+```bash
+python tests/timeline_render_smoke.py
+```
+
+A successful run prints `PASS: MIDI -> WAV render`, stereo channel count, duration and peak. This test does not require a GPU or MusicGen.
+
+For a real project test, launch the API in Colab after the normal dependency install:
+
+```bash
+uvicorn api.server:app --host 0.0.0.0 --port 8000
+```
+
+Then the Android client can call that API only if the Colab port is exposed through a public HTTPS tunnel and `EXPO_PUBLIC_API_URL` is set to that HTTPS base URL.
+
+### Test 2 — Android timeline editor
+
+Use the Expo mobile app/APK for the actual UI test. Generate a short song, open the timeline, generate MIDI parts, tap a MIDI clip, select a note in Piano Roll, change pitch/length, press **Save MIDI**, then press **Render Timeline → WAV**. The resulting WAV should contain the audio clips plus the rendered MIDI parts.
+
+The safest first test is a short project (roughly 10–30 seconds) so render time and debugging stay small.
+
 ## Run in Google Colab
 
 Open `colab/JE_AI_Audio_Studio.ipynb` in Colab, run the cells in order, and the notebook will clone/reset the `main` branch, install the base + optional AI dependencies, verify imports, and launch the Gradio UI with a temporary share URL.
