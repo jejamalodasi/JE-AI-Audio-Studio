@@ -56,7 +56,7 @@ export function artifactUrl(jobId: string, artifact: "final" | "vocal" | "backin
 
 export async function downloadArtifact(
   jobId: string,
-  artifact: "final" | "vocal" | "backing" | "bundle",
+  artifact: "final" | "vocal" | "backing" | "bundle" | "remix",
   extension: string,
 ) {
   const exportDirectory = new Directory(Paths.document, "exports");
