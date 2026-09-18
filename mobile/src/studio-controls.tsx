@@ -162,7 +162,16 @@ export function StudioControls({
   }
 
   return (
-    <View style={{ gap: 14 }}>
+    <View
+      style={{
+        backgroundColor: "#141821",
+        borderRadius: 20,
+        padding: 18,
+        gap: 14,
+        borderWidth: 1,
+        borderColor: "#252b38",
+      }}
+    >
       <View style={{ gap: 8 }}>
         <Text selectable style={{ color: "#f5f7fb", fontSize: 17, fontWeight: "800" }}>
           02 · AI Song Direction
@@ -413,6 +422,17 @@ export function StudioControls({
               if (Number.isFinite(next)) setConfig((current) => ({ ...current, top_k: Math.max(0, Math.min(1000, Math.round(next))) }));
             }}
             keyboardType="numeric"
+          />
+          <Field
+            label="Top P"
+            value={String(config.top_p)}
+            onChangeText={(value) => {
+              const next = Number(value);
+              if (Number.isFinite(next)) {
+                setConfig((current) => ({ ...current, top_p: Math.max(0, Math.min(1, next)) }));
+              }
+            }}
+            keyboardType="decimal-pad"
           />
           <Field
             label="Seed"
