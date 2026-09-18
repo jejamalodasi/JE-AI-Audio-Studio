@@ -1,6 +1,7 @@
 import * as DocumentPicker from "expo-document-picker";
 import { useAudioPlayer } from "expo-audio";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -45,7 +46,7 @@ const DEFAULT_CONFIG: SongConfig = {
   device: "auto",
 };
 
-function Card({ children }: { children: React.ReactNode }) {
+function Card({ children }: { children: ReactNode }) {
   return (
     <View
       style={{
@@ -101,10 +102,8 @@ function ActionButton({
   );
 }
 
-function AudioPreview({ uri }: { uri: string | null }) {
-  const player = useAudioPlayer(uri || null);
-
-  if (!uri) return null;
+function AudioPreview({ uri }: { uri: string }) {
+  const player = useAudioPlayer(uri);
 
   return (
     <View style={{ gap: 10 }}>
@@ -355,7 +354,7 @@ export default function HomeScreen() {
         </Card>
       )}
 
-      <AudioPreview uri={downloadedUri?.endsWith(".wav") ? downloadedUri : null} />
+      {downloadedUri?.endsWith(".wav") ? <AudioPreview uri={downloadedUri} /> : null}
 
       <Text selectable style={{ color: "#70798a", fontSize: 12, lineHeight: 18 }}>
         {message}
