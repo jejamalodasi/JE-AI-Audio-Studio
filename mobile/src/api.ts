@@ -287,6 +287,7 @@ export async function renderTimeline(
   values: {
     timeline: TimelineState;
     trackMix: TrackMixSettings;
+    bpm: number;
     targetPeak: number;
     compressionRatio: number;
     saturation: number;
