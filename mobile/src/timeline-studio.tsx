@@ -668,9 +668,12 @@ export function TimelineStudio({
         0,
         baseStart + baseDuration - EDIT_STEP,
       );
+      const sourceShift = nextStart - baseStart;
+      const clip = timeline.clips.find((item) => item.id === id);
       updateClip(id, {
         startSec: nextStart,
-        durationSec: Math.max(EDIT_STEP, baseDuration - (nextStart - baseStart)),
+        durationSec: Math.max(EDIT_STEP, baseDuration - sourceShift),
+        ...(clip ? { sourceOffsetSec: clip.sourceOffsetSec + sourceShift } : {}),
       });
       return;
     }
@@ -701,6 +704,7 @@ export function TimelineStudio({
       id: selectedClip.id + "-b-" + Date.now().toString(36),
       startSec: splitAt,
       durationSec: rightDuration,
+      sourceOffsetSec: selectedClip.sourceOffsetSec + leftDuration,
       fadeInSec: 0,
       fadeOutSec: selectedClip.fadeOutSec,
     };
@@ -727,6 +731,7 @@ export function TimelineStudio({
     updateClip(selectedClip.id, {
       startSec: newStart,
       durationSec: Math.max(EDIT_STEP, selectedClip.durationSec - delta),
+      sourceOffsetSec: selectedClip.sourceOffsetSec + delta,
     });
     onMessage(`Trimmed ${selectedClip.label} start by ${EDIT_STEP.toFixed(1)}s.`);
   }
@@ -887,6 +892,7 @@ export function TimelineStudio({
                 label: track.label,
                 startSec: 0,
                 durationSec: total,
+                sourceOffsetSec: 0,
                 sourceUri,
                 sourcePart,
                 fadeInSec: 0,
