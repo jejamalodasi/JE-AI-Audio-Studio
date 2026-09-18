@@ -20,6 +20,7 @@ import {
   healthCheck,
 } from "../src/api";
 import {
+  clearDraft,
   loadDraft,
   loadProjects,
   saveDraft,
@@ -434,9 +435,14 @@ export default function HomeScreen() {
     await removeProject(id);
     setProjects((current) => current.filter((project) => project.id !== id));
     if (id === projectId) {
+      await clearDraft();
       setJob(null);
       setLocalArtifacts({});
-      setMessage("Local project removed from history. Source/export files are kept.");
+      setFile(null);
+      setConfig(DEFAULT_CONFIG);
+      setProjectId(newProjectId());
+      setCreatedAt(new Date().toISOString());
+      setMessage("Local project removed from history and current draft.");
     }
   }
 
