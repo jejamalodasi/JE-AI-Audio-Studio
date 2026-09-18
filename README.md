@@ -103,6 +103,20 @@ pip install -r requirements-ai.txt
 
 The current melody, accompaniment, vocal-fix and mix/master modules are lightweight foundations. The neural backends are real optional model integrations, but this project is not yet equivalent to a commercial neural vocal editor, neural source separator, or end-to-end AI music generator. Heavy learned models remain behind modular interfaces so stronger or differently licensed models can be added later.
 
+## Android release APK
+
+The mobile app has a dedicated GitHub Actions workflow at `.github/workflows/release-apk.yml`. It builds the Expo app with the **release** EAS profile, which produces an Android `.apk` using the release Gradle task rather than `assembleDebug`.
+
+To run it from GitHub:
+
+1. Open **Actions → Build Release APK**.
+2. Choose **Run workflow**.
+3. After the job succeeds, open the workflow run and download **JE-AI-Audio-Studio-release-apk** from Artifacts.
+
+The repository must have an `EXPO_TOKEN` GitHub Actions secret containing an Expo access token with access to this EAS project. The workflow deliberately stops with a clear error when the secret is missing.
+
+The release APK is intended for direct Android-device testing/distribution. For Google Play, use a separate production `.aab` build; Expo documents APK builds as the device-installable format and AAB as the normal Play Store format. citeturn138158search0turn756832search2
+
 ## Timeline + MIDI render testing
 
 The timeline editor now supports a real render path for both audio clips and MIDI clips. MIDI clips are rendered server-side with the built-in lightweight synthesizer and mixed with the audio clips into a new WAV. Edited MIDI takes precedence over the original generated MIDI.
