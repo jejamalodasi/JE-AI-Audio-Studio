@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -283,6 +283,10 @@ def get_song_job(job_id: str) -> JSONResponse:
         if remix.get("final_path"):
             artifacts["remix"] = f"{API_PREFIX}/jobs/{job_id}/download/remix"
 
+        timeline_render = job.get("timeline_render") or {}
+        if timeline_render.get("final_path"):
+            artifacts["timeline"] = f"{API_PREFIX}/jobs/{job_id}/download/timeline"
+
         generated_parts = job.get("parts", {}).get("parts", {})
         for part_name, part_path in generated_parts.items():
             if part_path:
@@ -313,8 +317,13 @@ def download_song_artifact(job_id: str, artifact: str) -> FileResponse:
         "backing": result.get("backing_path"),
         "bundle": result.get("bundle_path"),
         "remix": (job.get("remix") or {}).get("final_path"),
+        "timeline": (job.get("timeline_render") or {}).get("final_path"),
         **(job.get("parts") or {}).get("parts", {}),
     }
+
+    midi_edits = job.get("midi_edits") or {}
+    for midi_part, edit_data in midi_edits.items():
+        mapping[f"midi-{midi_part}"] = edit_data.get("path")
 
     path_value = mapping.get(artifact)
     if not path_value:
@@ -607,3 +616,258 @@ def get_midi_notes(job_id: str, part: str) -> JSONResponse:
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}") from exc
+
+
+@app.post(f"{API_PREFIX}/jobs/{{job_id}}/render-timeline")
+async def render_timeline(
+    job_id: str,
+    payload: dict[str, Any] = Body(...),
+) -> JSONResponse:
+    job = _completed_job(job_id)
+    timeline = payload.get("timeline")
+    track_mix = payload.get("trackMix") or {}
+    if not isinstance(timeline, dict) or not isinstance(timeline.get("clips"), list):
+        raise HTTPException(status_code=400, detail="timeline.clips must be a JSON list")
+
+    clips = [clip for clip in timeline["clips"] if isinstance(clip, dict)]
+    audio_clips = [clip for clip in clips if clip.get("kind") == "audio"]
+    if not audio_clips:
+        raise HTTPException(status_code=400, detail="No audio clips are available to render")
+
+    total_end = max(
+        float(clip.get("startSec", 0.0)) + max(0.0, float(clip.get("durationSec", 0.0)))
+        for clip in audio_clips
+    )
+    if total_end <= 0:
+        raise HTTPException(status_code=400, detail="Timeline contains no positive-duration audio clips")
+    if total_end > 30 * 60:
+        raise HTTPException(status_code=400, detail="Timeline render is limited to 30 minutes")
+
+    source_cache: dict[str, tuple[np.ndarray, int]] = {}
+    loaded_order: list[str] = []
+
+    def gain_from_setting(setting: Any) -> float:
+        if not isinstance(setting, dict):
+            return 1.0
+        if bool(setting.get("muted")):
+            return 0.0
+        volume = float(setting.get("volume", 1.0))
+        return float(np.clip(volume, 0.0, 1.0))
+
+    solo_tracks = {
+        str(track_id)
+        for track_id, setting in track_mix.items()
+        if isinstance(setting, dict) and bool(setting.get("solo"))
+    }
+
+    def load_clip_source(artifact: str) -> tuple[np.ndarray, int]:
+        if artifact in source_cache:
+            return source_cache[artifact]
+        path = _audio_path(job, artifact)
+        audio, sr = load_audio(str(path), mono=False)
+        audio = np.asarray(audio, dtype=np.float32)
+        source_cache[artifact] = (audio, int(sr))
+        loaded_order.append(artifact)
+        return audio, int(sr)
+
+    try:
+        target_sr = None
+        for clip in audio_clips:
+            artifact = str(clip.get("sourceArtifact", "")).strip().lower()
+            if artifact not in {"vocal", "backing"}:
+                continue
+            _, sr = load_clip_source(artifact)
+            target_sr = target_sr or sr
+        if target_sr is None:
+            raise HTTPException(status_code=400, detail="Audio clips need vocal/backing source artifacts")
+        import librosa
+
+        def to_stereo(audio: np.ndarray) -> np.ndarray:
+            if audio.ndim == 1:
+                return np.column_stack((audio, audio)).astype(np.float32)
+            if audio.ndim == 2 and audio.shape[1] == 1:
+                return np.repeat(audio, 2, axis=1).astype(np.float32)
+            if audio.ndim == 2:
+                return audio[:, :2].astype(np.float32)
+            raise ValueError("Unsupported audio shape")
+
+        length = max(1, int(np.ceil(total_end * target_sr)))
+        mix = np.zeros((length, 2), dtype=np.float64)
+
+        for clip in audio_clips:
+            artifact = str(clip.get("sourceArtifact", "")).strip().lower()
+            if artifact not in {"vocal", "backing"}:
+                continue
+
+            setting = track_mix.get(str(clip.get("trackId", "")), {})
+            if solo_tracks and str(clip.get("trackId", "")) not in solo_tracks:
+                continue
+            track_gain = gain_from_setting(setting)
+            if track_gain <= 0:
+                continue
+
+            source, sr = load_clip_source(artifact)
+            source = to_stereo(source)
+            if sr != target_sr:
+                source = np.column_stack([
+                    librosa.resample(source[:, ch], orig_sr=sr, target_sr=target_sr)
+                    for ch in range(2)
+                ]).astype(np.float32)
+
+            offset_sec = max(0.0, float(clip.get("sourceOffsetSec", 0.0)))
+            start_sec = max(0.0, float(clip.get("startSec", 0.0)))
+            duration_sec = max(0.0, float(clip.get("durationSec", 0.0)))
+            if duration_sec <= 0:
+                continue
+
+            source_start = min(source.shape[0], int(round(offset_sec * target_sr)))
+            source_len = min(
+                int(round(duration_sec * target_sr)),
+                source.shape[0] - source_start,
+            )
+            dest_start = int(round(start_sec * target_sr))
+            if source_len <= 0 or dest_start >= length:
+                continue
+            source_len = min(source_len, length - dest_start)
+            piece = source[source_start:source_start + source_len].astype(np.float64)
+
+            fade_in = min(source_len, int(round(max(0.0, float(clip.get("fadeInSec", 0.0))) * target_sr)))
+            fade_out = min(source_len, int(round(max(0.0, float(clip.get("fadeOutSec", 0.0))) * target_sr)))
+            envelope = np.ones(source_len, dtype=np.float64)
+            if fade_in > 1:
+                envelope[:fade_in] *= np.linspace(0.0, 1.0, fade_in, endpoint=True)
+            if fade_out > 1:
+                envelope[-fade_out:] *= np.linspace(1.0, 0.0, fade_out, endpoint=True)
+
+            piece *= envelope[:, None] * track_gain
+            mix[dest_start:dest_start + source_len] += piece
+
+        peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+        if peak > 1.0:
+            mix /= peak
+        mixed = np.clip(mix, -1.0, 1.0).astype(np.float32)
+
+        mastered = master_audio(
+            mixed,
+            MasteringConfig(
+                target_peak=float(payload.get("targetPeak", 0.95)),
+                compressor_ratio=float(payload.get("compressionRatio", 2.0)),
+                makeup_db=1.0,
+                saturation=float(payload.get("saturation", 0.08)),
+            ),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}") from exc
+
+    root = Path(job["result"]["final_path"]).parent / "timeline_renders"
+    root.mkdir(parents=True, exist_ok=True)
+    filename = f"timeline_render_{uuid.uuid4().hex[:10]}.wav"
+    final_path = root / filename
+    save_wav(mastered, int(target_sr), str(final_path))
+
+    render = {
+        "final_path": str(final_path),
+        "duration_seconds": float(mastered.shape[0] / target_sr),
+        "sample_rate": int(target_sr),
+        "audio_clip_count": len(audio_clips),
+        "midi_clip_count": len([clip for clip in clips if clip.get("kind") == "midi"]),
+        "sources": loaded_order,
+    }
+    _job_update(job_id, timeline_render=render)
+
+    return JSONResponse(
+        content={
+            "job_id": job_id,
+            "status": "completed",
+            "filename": filename,
+            "download": f"{API_PREFIX}/jobs/{job_id}/download/timeline",
+            "duration_seconds": render["duration_seconds"],
+            "audio_clip_count": render["audio_clip_count"],
+            "midi_clip_count": render["midi_clip_count"],
+        }
+    )
+
+
+@app.post(f"{API_PREFIX}/jobs/{{job_id}}/midi-edit")
+async def save_midi_edits(
+    job_id: str,
+    payload: dict[str, Any] = Body(...),
+) -> JSONResponse:
+    job = _completed_job(job_id)
+    part = str(payload.get("part", "")).strip().lower()
+    allowed = {"melody", "chords", "bass", "drums", "rhythm", "arrangement"}
+    if part not in allowed:
+        raise HTTPException(status_code=400, detail="Unknown MIDI part")
+
+    notes = payload.get("notes")
+    if not isinstance(notes, list):
+        raise HTTPException(status_code=400, detail="notes must be a JSON list")
+    if len(notes) > 5000:
+        raise HTTPException(status_code=400, detail="Too many MIDI notes")
+
+    bpm = float(payload.get("bpm", 120.0))
+    if bpm <= 0 or bpm > 400:
+        raise HTTPException(status_code=400, detail="bpm must be between 1 and 400")
+
+    try:
+        import mido
+
+        ticks_per_beat = 480
+        midi = mido.MidiFile(ticks_per_beat=ticks_per_beat)
+        track = mido.MidiTrack()
+        midi.tracks.append(track)
+        track.append(mido.MetaMessage("track_name", name=part.title()))
+        track.append(
+            mido.MetaMessage(
+                "set_tempo",
+                tempo=mido.bpm2tempo(bpm),
+                time=0,
+            )
+        )
+
+        events: list[tuple[int, int, mido.Message]] = []
+        for item in notes:
+            if not isinstance(item, dict):
+                continue
+            note = int(np.clip(int(item.get("note", 60)), 0, 127))
+            velocity = int(np.clip(int(item.get("velocity", 96)), 1, 127))
+            start = max(0.0, float(item.get("startBeat", 0.0)))
+            duration = max(0.01, float(item.get("durationBeat", 0.25)))
+            start_tick = int(round(start * ticks_per_beat))
+            end_tick = int(round((start + duration) * ticks_per_beat))
+            events.append((start_tick, 1, mido.Message("note_on", note=note, velocity=velocity, time=0, channel=0)))
+            events.append((end_tick, 0, mido.Message("note_off", note=note, velocity=0, time=0, channel=0)))
+
+        events.sort(key=lambda item: (item[0], item[1]))
+        last_tick = 0
+        for tick, _, message in events:
+            message.time = max(0, tick - last_tick)
+            track.append(message)
+            last_tick = tick
+
+        track.append(mido.MetaMessage("end_of_track", time=0))
+
+        root = Path(job["result"]["final_path"]).parent / "midi_edits"
+        root.mkdir(parents=True, exist_ok=True)
+        filename = f"{part}_edited_{uuid.uuid4().hex[:10]}.mid"
+        final_path = root / filename
+        midi.save(str(final_path))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}") from exc
+
+    with _jobs_lock:
+        current = _jobs.setdefault(job_id, {})
+        edits = dict(current.get("midi_edits") or {})
+        edits[part] = {"path": str(final_path), "filename": filename}
+        current["midi_edits"] = edits
+
+    return JSONResponse(
+        content={
+            "job_id": job_id,
+            "part": part,
+            "filename": filename,
+            "download": f"{API_PREFIX}/jobs/{job_id}/download/midi-{part}",
+        }
+    )
