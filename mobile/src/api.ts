@@ -49,7 +49,7 @@ export async function getSongJob(jobId: string): Promise<SongJob> {
   return response.json();
 }
 
-export function artifactUrl(jobId: string, artifact: "final" | "vocal" | "backing" | "bundle") {
+export function artifactUrl(jobId: string, artifact: "final" | "vocal" | "backing" | "bundle" | "remix") {
   requireApiUrl();
   return `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/download/${artifact}`;
 }
