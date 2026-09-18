@@ -57,3 +57,25 @@ export type MusicPartFiles = Partial<Record<
   "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement",
   string
 >>;
+
+export type TimelineClipKind = "audio" | "midi";
+
+export type TimelineClip = {
+  id: string;
+  trackId: "vocal" | "backing" | "melody" | "chords" | "bass" | "drums" | "rhythm";
+  kind: TimelineClipKind;
+  label: string;
+  startSec: number;
+  durationSec: number;
+  sourceUri?: string;
+  sourceArtifact?: "vocal" | "backing";
+  sourcePart?: "melody" | "chords" | "bass" | "drums" | "rhythm";
+  fadeInSec: number;
+  fadeOutSec: number;
+};
+
+export type TimelineState = {
+  clips: TimelineClip[];
+  playheadSec: number;
+  zoom: number;
+};
