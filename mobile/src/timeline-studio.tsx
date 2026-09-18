@@ -12,6 +12,7 @@ import {
   saveMidiEdits,
   generateMusicParts,
   getMidiNotes,
+  renderTimeline,
 } from "./api";
 import type { ClipEditAction } from "./api";
 import type {
