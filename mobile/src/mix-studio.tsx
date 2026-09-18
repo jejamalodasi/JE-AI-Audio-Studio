@@ -1,5 +1,6 @@
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import * as Sharing from "expo-sharing";
+import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
 import { remixSongJob, downloadArtifact } from "./api";
@@ -218,26 +219,26 @@ export function MixStudio({
   onRemixSaved: (uri: string) => void;
   onMessage: (message: string) => void;
 }) {
-  const [volumes, setVolumes] = require("react").useState({
+  const [volumes, setVolumes] = useState({
     vocal: 0.9,
     backing: 0.75,
     final: 1,
     remix: 1,
   });
-  const [muted, setMuted] = require("react").useState({
+  const [muted, setMuted] = useState({
     vocal: false,
     backing: false,
     final: false,
     remix: false,
   });
-  const [active, setActive] = require("react").useState<string | null>(null);
-  const [mixing, setMixing] = require("react").useState(false);
+  const [active, setActive] = useState<string | null>(null);
+  const [mixing, setMixing] = useState(false);
 
-  const [currentVocalGain, setCurrentVocalGain] = require("react").useState(vocalGain);
-  const [currentBackingGain, setCurrentBackingGain] = require("react").useState(backingGain);
-  const [currentTargetPeak, setCurrentTargetPeak] = require("react").useState(targetPeak);
-  const [currentCompression, setCurrentCompression] = require("react").useState(compressionRatio);
-  const [currentSaturation, setCurrentSaturation] = require("react").useState(saturation);
+  const [currentVocalGain, setCurrentVocalGain] = useState(vocalGain);
+  const [currentBackingGain, setCurrentBackingGain] = useState(backingGain);
+  const [currentTargetPeak, setCurrentTargetPeak] = useState(targetPeak);
+  const [currentCompression, setCurrentCompression] = useState(compressionRatio);
+  const [currentSaturation, setCurrentSaturation] = useState(saturation);
 
   async function applyMix() {
     setMixing(true);
