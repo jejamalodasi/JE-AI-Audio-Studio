@@ -17,6 +17,7 @@ export type SongJob = {
     bundle: string;
     remix?: string;
   };
+  musicParts?: Partial<Record<"melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement", string>>;
 };
 
 export type SongConfig = {
