@@ -336,6 +336,29 @@ export default function HomeScreen() {
           <Text selectable style={{ color: "#c9d0dc", fontSize: 15, fontWeight: "700" }}>
             {statusTitle}
           </Text>
+          {job.status === "queued" || job.status === "running" ? (
+            <View style={{ gap: 7 }}>
+              <View
+                style={{
+                  height: 8,
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  backgroundColor: "#252b38",
+                }}
+              >
+                <View
+                  style={{
+                    width: `${Math.max(0, Math.min(100, job.progress ?? 0))}%`,
+                    height: "100%",
+                    backgroundColor: "#f4f6fa",
+                  }}
+                />
+              </View>
+              <Text selectable style={{ color: "#8f98aa", fontSize: 12 }}>
+                ${Math.round(job.progress ?? 0)}%
+              </Text>
+            </View>
+          ) : null}
           {job.error ? (
             <Text selectable style={{ color: "#ff8b8b", lineHeight: 20 }}>
               {job.error}
