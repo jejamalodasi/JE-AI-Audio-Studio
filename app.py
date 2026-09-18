@@ -7,6 +7,7 @@ from typing import Optional
 import gradio as gr
 
 from ai.arrangement_generator import AIConditionedArrangementConfig, generate_ai_conditioned_arrangement
+from ai.full_song_pipeline import FullSongPipelineConfig, build_full_song_pipeline
 from ai.basic_pitch_transcriber import transcribe_with_basic_pitch
 from ai.musicgen_melody import MusicGenConfig, generate_musicgen_melody
 from ai.neural_vocal_enhancement import enhance_vocal_neural
@@ -415,6 +416,98 @@ def build_ai_song_sketch(
         return None, None, None, f"❌ AI Song Builder failed: {type(exc).__name__}: {exc}"
 
 
+
+def run_full_song_pipeline(
+    path: Optional[str],
+    prompt: str,
+    cleanup_mode: str,
+    bpm: float,
+    key: str,
+    scale: str,
+    selected_sections,
+    intro_seconds: float,
+    verse_seconds: float,
+    chorus_seconds: float,
+    bridge_seconds: float,
+    outro_seconds: float,
+    crossfade: float,
+    continuity: str,
+    guidance: float,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    seed: int,
+    vocal_gain_db: float,
+    music_gain_db: float,
+    target_peak: float,
+    compression_ratio: float,
+    saturation: float,
+    device: str,
+):
+    if not path:
+        return None, None, None, None, "Please upload a vocal/audio file first."
+    try:
+        selected = [str(section) for section in (selected_sections or [])]
+        if not selected:
+            raise ValueError("Select at least one song section.")
+
+        durations = {
+            "Intro": float(intro_seconds),
+            "Verse": float(verse_seconds),
+            "Chorus": float(chorus_seconds),
+            "Bridge": float(bridge_seconds),
+            "Outro": float(outro_seconds),
+        }
+        sections = tuple(
+            SongSection(name, durations[name])
+            for name in SECTION_ORDER
+            if name in selected
+        )
+
+        cfg = FullSongPipelineConfig(
+            base_prompt=str(prompt).strip(),
+            cleanup_mode=str(cleanup_mode).strip().lower().replace(" ", "-"),
+            bpm=float(bpm) if float(bpm) > 0 else None,
+            key=None if str(key) == "Auto" else str(key),
+            scale=None if str(scale) == "Auto" else str(scale),
+            sections=sections,
+            crossfade_seconds=float(crossfade),
+            continuity=str(continuity),
+            guidance_scale=float(guidance),
+            temperature=float(temperature),
+            top_k=int(top_k),
+            top_p=float(top_p),
+            seed=int(seed),
+            vocal_gain_db=float(vocal_gain_db),
+            music_gain_db=float(music_gain_db),
+            target_peak=float(target_peak),
+            compression_ratio=float(compression_ratio),
+            saturation=float(saturation),
+            device=str(device),
+            max_total_seconds=90.0,
+        )
+        result = build_full_song_pipeline(path, config=cfg)
+        status = (
+            "### 🚀 Full AI Song Pipeline complete\n"
+            f"Cleanup: **{result['cleanup_mode']}**\n\n"
+            f"Sections: **{result['section_count']}**\n\n"
+            f"Final master: **{result['duration_seconds']:.2f}s @ {result['sample_rate']:,} Hz**\n\n"
+            f"Continuity: **{result['continuity']}** · Seed: **{result['seed']}**\n\n"
+            "Pipeline: **Vocal cleanup → AI backing → vocal/backing mix → master → ZIP export**\n\n"
+            "⚠️ The current MusicGen backend uses CC-BY-NC 4.0 weights. Replace it with a separately licensed backend before commercial deployment."
+        )
+        return (
+            result["final_path"],
+            result["vocal_path"],
+            result["backing_path"],
+            result["bundle_path"],
+            status,
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        return None, None, None, None, f"❌ Full AI Song Pipeline failed: {type(exc).__name__}: {exc}"
+
+
 def generate_full_arrangement(
     path: Optional[str],
     bpm: float,
@@ -679,6 +772,83 @@ def build_app() -> gr.Blocks:
                     song_bundle_out = gr.File(label="Section Bundle (.zip)")
                 song_status = gr.Markdown("Each selected section is generated independently and joined with a controlled crossfade.")
                 song_btn.click(build_ai_song_sketch, inputs=[song_in, song_prompt, song_bpm, song_key, song_scale, song_sections, song_intro, song_verse, song_chorus, song_bridge, song_outro, song_crossfade, song_guidance, song_temperature, song_top_k, song_top_p, song_seed, song_continuity, song_vocal_gain, song_music_gain, song_device], outputs=[song_audio_out, song_preview_out, song_bundle_out, song_status])
+
+            with gr.Tab("🚀 Full AI Song Pipeline"):
+                gr.Markdown(
+                    "## 🚀 One-Click Full Song\n"
+                    "Run the whole concept workflow in one pass: **vocal cleanup → AI backing → vocal/backing mix → mastering → export bundle**. "
+                    "The current prototype is a short-sketch workflow capped at 90 seconds."
+                )
+                pipeline_in = gr.Audio(label="Vocal / Melody Reference", type="filepath", sources=["upload", "microphone"])
+                pipeline_prompt = gr.Textbox(
+                    label="Song style / production prompt",
+                    lines=3,
+                    value="Bengali folk-inspired emotional song, warm harmonium, bamboo flute, hand percussion, soft bass, organic modern production",
+                )
+                with gr.Row():
+                    pipeline_cleanup = gr.Dropdown(
+                        ["Original", "Basic Vocal Fix", "Advanced Vocal Fix"],
+                        value="Basic Vocal Fix",
+                        label="Vocal cleanup",
+                    )
+                    pipeline_bpm = gr.Number(value=0, minimum=0, maximum=240, label="BPM (0 = model-driven)")
+                    pipeline_key = gr.Dropdown(["Auto"] + KEYS, value="Auto", label="Key")
+                    pipeline_scale = gr.Dropdown(["Auto"] + SCALES, value="Auto", label="Scale")
+                    pipeline_continuity = gr.Dropdown(["vocal-anchor", "chain"], value="vocal-anchor", label="Continuity")
+                pipeline_sections = gr.CheckboxGroup(
+                    choices=list(SECTION_ORDER),
+                    value=list(SECTION_ORDER),
+                    label="Song structure",
+                )
+                with gr.Row():
+                    pipeline_intro = gr.Slider(1, 30, value=4, step=1, label="Intro (s)")
+                    pipeline_verse = gr.Slider(1, 30, value=8, step=1, label="Verse (s)")
+                    pipeline_chorus = gr.Slider(1, 30, value=10, step=1, label="Chorus (s)")
+                with gr.Row():
+                    pipeline_bridge = gr.Slider(1, 30, value=6, step=1, label="Bridge (s)")
+                    pipeline_outro = gr.Slider(1, 30, value=6, step=1, label="Outro (s)")
+                    pipeline_crossfade = gr.Slider(0, 2, value=0.45, step=0.05, label="Crossfade (s)")
+                with gr.Row():
+                    pipeline_guidance = gr.Slider(1, 6, value=3, step=0.1, label="Guidance")
+                    pipeline_temperature = gr.Slider(0.5, 1.5, value=1.0, step=0.05, label="Temperature")
+                    pipeline_top_k = gr.Slider(0, 500, value=250, step=10, label="Top-k")
+                    pipeline_top_p = gr.Slider(0, 1, value=0, step=0.05, label="Top-p")
+                with gr.Row():
+                    pipeline_seed = gr.Number(value=42, precision=0, label="Seed")
+                    pipeline_vocal_gain = gr.Slider(-12, 6, value=-1, step=0.5, label="Vocal gain (dB)")
+                    pipeline_music_gain = gr.Slider(-12, 6, value=-3, step=0.5, label="Music gain (dB)")
+                    pipeline_device = gr.Dropdown(["auto", "cpu", "cuda"], value="auto", label="Device")
+                with gr.Row():
+                    pipeline_peak = gr.Slider(0.80, 0.99, value=0.95, step=0.01, label="Master target peak")
+                    pipeline_ratio = gr.Slider(1, 8, value=2, step=0.25, label="Master compression ratio")
+                    pipeline_sat = gr.Slider(0, 1, value=0.08, step=0.02, label="Master saturation")
+                pipeline_btn = gr.Button("🚀 Build Full AI Song", variant="primary")
+                with gr.Row():
+                    pipeline_final_out = gr.Audio(label="FINAL MASTER", type="filepath")
+                    pipeline_vocal_out = gr.Audio(label="Cleaned Vocal", type="filepath")
+                with gr.Row():
+                    pipeline_backing_out = gr.Audio(label="AI Backing", type="filepath")
+                    pipeline_bundle_out = gr.File(label="Full Project Bundle (.zip)")
+                pipeline_status = gr.Markdown(
+                    "GPU/Colab recommended. Heavy MusicGen inference runs only when you press the button."
+                )
+                pipeline_btn.click(
+                    run_full_song_pipeline,
+                    inputs=[
+                        pipeline_in, pipeline_prompt, pipeline_cleanup, pipeline_bpm,
+                        pipeline_key, pipeline_scale, pipeline_sections,
+                        pipeline_intro, pipeline_verse, pipeline_chorus, pipeline_bridge, pipeline_outro,
+                        pipeline_crossfade, pipeline_continuity,
+                        pipeline_guidance, pipeline_temperature, pipeline_top_k, pipeline_top_p,
+                        pipeline_seed, pipeline_vocal_gain, pipeline_music_gain,
+                        pipeline_peak, pipeline_ratio, pipeline_sat, pipeline_device,
+                    ],
+                    outputs=[
+                        pipeline_final_out, pipeline_vocal_out, pipeline_backing_out,
+                        pipeline_bundle_out, pipeline_status,
+                    ],
+                )
+
 
             with gr.Tab("🎛️ Vocal → Music Parts"):
                 parts_in = gr.Audio(label="Vocal / Audio Input", type="filepath", sources=["upload", "microphone"])
