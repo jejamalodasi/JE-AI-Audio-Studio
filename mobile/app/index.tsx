@@ -21,6 +21,7 @@ import {
 } from "../src/api";
 import { StudioControls } from "../src/studio-controls";
 import { MixStudio } from "../src/mix-studio";
+import { TimelineStudio } from "../src/timeline-studio";
 import {
   clearDraft,
   loadDraft,
@@ -30,7 +31,13 @@ import {
   removeProject,
   type LocalProject,
 } from "../src/localStore";
-import type { PickedAudio, SongConfig, SongJob } from "../src/types";
+import type {
+  MusicPartFiles,
+  PickedAudio,
+  SongConfig,
+  SongJob,
+  TrackMixSettings,
+} from "../src/types";
 
 const DEFAULT_CONFIG: SongConfig = {
   base_prompt:
@@ -177,6 +184,8 @@ export default function HomeScreen() {
   const [job, setJob] = useState<SongJob | null>(null);
   const [projects, setProjects] = useState<LocalProject[]>([]);
   const [localArtifacts, setLocalArtifacts] = useState<LocalProject["localArtifacts"]>({});
+  const [musicParts, setMusicParts] = useState<MusicPartFiles>({});
+  const [trackMix, setTrackMix] = useState<TrackMixSettings>({});
   const [projectId, setProjectId] = useState(newProjectId());
   const [createdAt, setCreatedAt] = useState(new Date().toISOString());
   const [message, setMessage] = useState("Select a vocal, then build your song.");
@@ -199,6 +208,8 @@ export default function HomeScreen() {
       config,
       job: nextJob,
       localArtifacts: nextArtifacts,
+      musicParts,
+      trackMix,
     };
   }
 
@@ -233,6 +244,8 @@ export default function HomeScreen() {
         });
         setJob(draft.job ?? null);
         setLocalArtifacts(draft.localArtifacts ?? {});
+        setMusicParts(draft.musicParts ?? {});
+        setTrackMix(draft.trackMix ?? {});
 
         const sourceUri = draft.source?.uri;
         const sourceExists = sourceUri ? new File(sourceUri).exists : false;
@@ -327,6 +340,8 @@ export default function HomeScreen() {
       setFile(persistentFile);
       setJob(null);
       setLocalArtifacts({});
+      setMusicParts({});
+      setTrackMix({});
       setMessage("✅ Reference copied to persistent app storage. Draft auto-save is on.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not select and save the file.");
@@ -386,6 +401,7 @@ export default function HomeScreen() {
     setBusy(true);
     setJob(null);
     setLocalArtifacts({});
+    setMusicParts({});
     setMessage("Uploading reference…");
 
     try {
@@ -436,6 +452,8 @@ export default function HomeScreen() {
     });
     setJob(saved.job ?? null);
     setLocalArtifacts(saved.localArtifacts ?? {});
+    setMusicParts(saved.musicParts ?? {});
+    setTrackMix(saved.trackMix ?? {});
 
     if (saved.source?.uri && new File(saved.source.uri).exists) {
       setFile(saved.source);
@@ -461,6 +479,8 @@ export default function HomeScreen() {
       await clearDraft();
       setJob(null);
       setLocalArtifacts({});
+      setMusicParts({});
+      setTrackMix({});
       setFile(null);
       setConfig(DEFAULT_CONFIG);
       setProjectId(newProjectId());
@@ -590,6 +610,25 @@ export default function HomeScreen() {
 
       {localArtifacts?.final && new File(localArtifacts.final).exists ? (
         <AudioPreview uri={localArtifacts.final} />
+      ) : null}
+
+      {completed && job?.job_id ? (
+        <TimelineStudio
+          jobId={job.job_id}
+          config={config}
+          artifacts={localArtifacts}
+          musicParts={musicParts}
+          trackSettings={trackMix}
+          onTrackSettingsChange={(settings) => {
+            setTrackMix(settings);
+            if (hydrated) void persistHistory(job, localArtifacts);
+          }}
+          onMusicPartsChange={(parts) => {
+            setMusicParts(parts);
+            if (hydrated) void persistHistory(job, localArtifacts);
+          }}
+          onMessage={setMessage}
+        />
       ) : null}
 
       {completed && job?.job_id ? (
