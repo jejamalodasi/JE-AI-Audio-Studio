@@ -17,8 +17,6 @@ export type SongJob = {
     bundle: string;
     remix?: string;
   };
-  musicParts?: Partial<Record<"melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement", string>>;
-  trackMix?: TrackMixSettings;
 };
 
 export type TrackMixState = {
@@ -54,3 +52,8 @@ export type SongConfig = {
   device: "auto" | "cpu" | "cuda";
   max_total_seconds: number;
 };
+
+export type MusicPartFiles = Partial<Record<
+  "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement",
+  string
+>>;
