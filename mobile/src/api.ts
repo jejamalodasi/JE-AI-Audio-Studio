@@ -49,14 +49,27 @@ export async function getSongJob(jobId: string): Promise<SongJob> {
   return response.json();
 }
 
-export function artifactUrl(jobId: string, artifact: "final" | "vocal" | "backing" | "bundle" | "remix") {
+export type ArtifactKind =
+  | "final"
+  | "vocal"
+  | "backing"
+  | "bundle"
+  | "remix"
+  | "melody"
+  | "chords"
+  | "bass"
+  | "drums"
+  | "rhythm"
+  | "arrangement";
+
+export function artifactUrl(jobId: string, artifact: ArtifactKind) {
   requireApiUrl();
   return `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/download/${artifact}`;
 }
 
 export async function downloadArtifact(
   jobId: string,
-  artifact: "final" | "vocal" | "backing" | "bundle" | "remix" | "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement",
+  artifact: ArtifactKind,
   extension: string,
 ) {
   const exportDirectory = new Directory(Paths.document, "exports");
@@ -71,7 +84,6 @@ export async function downloadArtifact(
   );
   return downloaded.uri;
 }
-
 
 export type RemixResult = {
   job_id: string;
@@ -109,27 +121,16 @@ export async function remixSongJob(
   return response.json();
 }
 
-
 export type MusicPartsResult = {
   job_id: string;
   status: "completed";
-  parts: Record<"melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement", string>;
-  bpm: number;
-  key: string;
-  scale: string;
-  bars: number;
-  seed: number;
+  parts: Partial<Record<"melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement", string>>;
+  metadata: Record<string, unknown>;
 };
 
 export async function generateMusicParts(
   jobId: string,
-  values: {
-    bpm: number;
-    key: string;
-    scale: string;
-    bars: number;
-    seed: number;
-  },
+  values: { bpm: number; key: string; scale: string; bars: number; seed: number },
 ): Promise<MusicPartsResult> {
   requireApiUrl();
   const form = new FormData();
