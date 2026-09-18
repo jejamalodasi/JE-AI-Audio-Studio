@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "JE AI Audio Studio",
+    "slug": "je-ai-audio-studio",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "jeai",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "plugins": ["expo-router", "expo-document-picker", "expo-audio"],
+    "android": {
+      "package": "com.jejamalodasi.jeaiaudiostudio",
+      "versionCode": 1
+    },
+    "web": { "bundler": "metro" },
+    "experiments": { "typedRoutes": true }
+  }
+}
