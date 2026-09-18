@@ -1,10 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as Sharing from "expo-sharing";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import { PanResponder, Pressable, ScrollView, Text, View } from "react-native";
 
-import { downloadArtifact, downloadClipEdit, editSongClip, generateMusicParts } from "./api";
+import {
+  artifactUrl,
+  downloadArtifact,
+  downloadClipEdit,
+  editSongClip,
+  generateMusicParts,
+  getMidiNotes,
+} from "./api";
 import type { ClipEditAction } from "./api";
 import type {
+  MidiNote,
   MusicPartFiles,
   SongConfig,
   TimelineClip,
@@ -86,8 +95,15 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function snapTime(seconds: number) {
+  return Math.round(seconds / EDIT_STEP) * EDIT_STEP;
+}
+
 function totalSeconds(config: SongConfig) {
-  return Math.max(1, config.sections.reduce((sum, section) => sum + Math.max(0, section.duration_seconds), 0));
+  return Math.max(
+    1,
+    config.sections.reduce((sum, section) => sum + Math.max(0, section.duration_seconds), 0),
+  );
 }
 
 function defaultTimeline(
@@ -149,6 +165,366 @@ function defaultTimeline(
   return { clips, playheadSec: 0, zoom: 48 };
 }
 
+function ClipBlock({
+  clip,
+  selected,
+  current,
+  soloExists,
+  zoom,
+  total,
+  onSelect,
+  onMove,
+  onResize,
+}: {
+  clip: TimelineClip;
+  selected: boolean;
+  current: TrackMixState;
+  soloExists: boolean;
+  zoom: number;
+  total: number;
+  onSelect: (clipId: string) => void;
+  onMove: (clipId: string, baseStart: number, deltaSeconds: number) => void;
+  onResize: (
+    clipId: string,
+    baseStart: number,
+    baseDuration: number,
+    edge: "left" | "right",
+    deltaSeconds: number,
+  ) => void;
+}) {
+  const dragStart = useRef({ start: clip.startSec, duration: clip.durationSec });
+
+  const moveResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dx) > Math.abs(gesture.dy) && Math.abs(gesture.dx) > 5,
+        onPanResponderGrant: () => {
+          dragStart.current = { start: clip.startSec, duration: clip.durationSec };
+          onSelect(clip.id);
+        },
+        onPanResponderMove: (_, gesture) => {
+          onMove(clip.id, dragStart.current.start, gesture.dx / zoom);
+        },
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [clip.id, clip.startSec, clip.durationSec, onMove, onSelect, zoom],
+  );
+
+  const leftResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          dragStart.current = { start: clip.startSec, duration: clip.durationSec };
+          onSelect(clip.id);
+        },
+        onPanResponderMove: (_, gesture) => {
+          onResize(
+            clip.id,
+            dragStart.current.start,
+            dragStart.current.duration,
+            "left",
+            gesture.dx / zoom,
+          );
+        },
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [clip.id, clip.startSec, clip.durationSec, onResize, onSelect, zoom],
+  );
+
+  const rightResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          dragStart.current = { start: clip.startSec, duration: clip.durationSec };
+          onSelect(clip.id);
+        },
+        onPanResponderMove: (_, gesture) => {
+          onResize(
+            clip.id,
+            dragStart.current.start,
+            dragStart.current.duration,
+            "right",
+            gesture.dx / zoom,
+          );
+        },
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [clip.id, clip.startSec, clip.durationSec, onResize, onSelect, zoom],
+  );
+
+  return (
+    <View
+      {...moveResponder.panHandlers}
+      style={{
+        position: "absolute",
+        left: clip.startSec * zoom + 3,
+        top: 11,
+        width: Math.max(22, clip.durationSec * zoom - 6),
+        height: 40,
+        borderRadius: 7,
+        backgroundColor: selected ? "#eef1f7" : clip.kind === "midi" ? "#263340" : "#2d333e",
+        borderWidth: 1,
+        borderColor: selected ? "#ffffff" : "#435064",
+        opacity: current.muted ? 0.28 : current.solo && soloExists ? 1 : 0.9,
+        overflow: "hidden",
+      }}
+    >
+      <Pressable
+        onPress={() => onSelect(clip.id)}
+        style={{ flex: 1, justifyContent: "center", paddingHorizontal: 10 }}
+      >
+        <Text
+          selectable
+          numberOfLines={1}
+          style={{
+            color: selected ? "#0c1016" : "#cbd3df",
+            fontSize: 9,
+            fontWeight: "800",
+            paddingRight: 16,
+          }}
+        >
+          {clip.kind === "midi" ? "MIDI · " : ""}
+          {clip.label}
+        </Text>
+        <Text
+          selectable
+          numberOfLines={1}
+          style={{ color: selected ? "#384354" : "#718096", fontSize: 8 }}
+        >
+          {clip.durationSec.toFixed(1)}s
+        </Text>
+      </Pressable>
+
+      <View
+        {...leftResponder.panHandlers}
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 13,
+          backgroundColor: selected ? "#cbd3df" : "#455064",
+          opacity: 0.8,
+        }}
+      />
+      <View
+        {...rightResponder.panHandlers}
+        style={{
+          position: "absolute",
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 13,
+          backgroundColor: selected ? "#cbd3df" : "#455064",
+          opacity: 0.8,
+        }}
+      />
+
+      {clip.kind === "audio" && (clip.fadeInSec > 0 || clip.fadeOutSec > 0) ? (
+        <Text
+          selectable
+          style={{
+            position: "absolute",
+            right: 16,
+            bottom: 2,
+            color: selected ? "#4f5969" : "#718096",
+            fontSize: 7,
+          }}
+        >
+          {clip.fadeInSec > 0 ? "FI " : ""}
+          {clip.fadeOutSec > 0 ? "FO" : ""}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function noteName(midi: number) {
+  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  return `${names[midi % 12]}${Math.floor(midi / 12) - 1}`;
+}
+
+function PianoRoll({
+  jobId,
+  clip,
+  bpm,
+}: {
+  jobId: string;
+  clip: TimelineClip;
+  bpm: number;
+}) {
+  const [notes, setNotes] = useState<MidiNote[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadNotes() {
+      if (!clip.sourcePart) {
+        setNotes([]);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await getMidiNotes(jobId, clip.sourcePart);
+        if (active) setNotes(result.notes);
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : "Could not load MIDI notes.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void loadNotes();
+    return () => {
+      active = false;
+    };
+  }, [clip.id, clip.sourcePart, jobId]);
+
+  const pitchBounds = useMemo(() => {
+    if (!notes.length) return { min: 48, max: 72 };
+    const min = Math.min(...notes.map((item) => item.note));
+    const max = Math.max(...notes.map((item) => item.note));
+    return { min: Math.max(24, min - 2), max: Math.min(108, max + 2) };
+  }, [notes]);
+
+  const maxBeat = notes.length
+    ? Math.max(...notes.map((item) => item.startBeat + item.durationBeat), 4)
+    : 4;
+  const rowHeight = 18;
+  const beatWidth = 34;
+  const rowCount = Math.max(1, pitchBounds.max - pitchBounds.min + 1);
+  const width = Math.max(520, Math.ceil(maxBeat * beatWidth + 40));
+  const height = rowCount * rowHeight;
+
+  return (
+    <View
+      style={{
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: "#2b3340",
+        backgroundColor: "#0b0e13",
+        overflow: "hidden",
+      }}
+    >
+      <View style={{ padding: 12, gap: 3 }}>
+        <Text selectable style={{ color: "#f2f5f8", fontWeight: "800", fontSize: 13 }}>
+          MIDI Piano Roll · {clip.label}
+        </Text>
+        <Text selectable style={{ color: "#667183", fontSize: 10 }}>
+          {bpm} BPM · {notes.length} notes · drag/trim edits on the parent MIDI clip
+        </Text>
+      </View>
+
+      {loading ? (
+        <Text selectable style={{ color: "#8893a3", fontSize: 11, padding: 12 }}>
+          Loading MIDI note data…
+        </Text>
+      ) : error ? (
+        <Text selectable style={{ color: "#ff9a9a", fontSize: 11, lineHeight: 17, padding: 12 }}>
+          {error}
+        </Text>
+      ) : !notes.length ? (
+        <Text selectable style={{ color: "#70798a", fontSize: 11, lineHeight: 17, padding: 12 }}>
+          No parsed notes yet. Generate the MIDI part first.
+        </Text>
+      ) : (
+        <View style={{ flexDirection: "row", height: Math.min(420, height) }}>
+          <View
+            style={{
+              width: 52,
+              backgroundColor: "#11151c",
+              borderRightWidth: 1,
+              borderRightColor: "#252b38",
+            }}
+          >
+            {Array.from({ length: rowCount }, (_, index) => {
+              const pitch = pitchBounds.max - index;
+              return (
+                <View
+                  key={pitch}
+                  style={{
+                    height: rowHeight,
+                    borderBottomWidth: 1,
+                    borderBottomColor: "#1c222d",
+                    justifyContent: "center",
+                    paddingHorizontal: 5,
+                  }}
+                >
+                  <Text selectable style={{ color: "#687385", fontSize: 8 }}>
+                    {noteName(pitch)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator>
+            <View style={{ width, height }}>
+              {Array.from({ length: Math.ceil(maxBeat) + 1 }, (_, beat) => (
+                <View
+                  key={beat}
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    left: beat * beatWidth,
+                    top: 0,
+                    bottom: 0,
+                    width: 1,
+                    backgroundColor: beat % 4 === 0 ? "#394251" : "#202633",
+                  }}
+                />
+              ))}
+
+              {notes.map((note, index) => {
+                const top = (pitchBounds.max - note.note) * rowHeight;
+                return (
+                  <View
+                    key={`${note.note}-${note.startBeat}-${index}`}
+                    style={{
+                      position: "absolute",
+                      left: note.startBeat * beatWidth + 1,
+                      top,
+                      width: Math.max(3, note.durationBeat * beatWidth - 2),
+                      height: Math.max(10, rowHeight - 3),
+                      borderRadius: 3,
+                      backgroundColor: "#8792a4",
+                      borderWidth: 1,
+                      borderColor: "#b9c1ce",
+                    }}
+                  />
+                );
+              })}
+
+              {Array.from({ length: Math.ceil(maxBeat / 4) }, (_, index) => (
+                <Text
+                  key={index}
+                  selectable
+                  style={{
+                    position: "absolute",
+                    left: index * 4 * beatWidth + 4,
+                    top: 3,
+                    color: "#616c7c",
+                    fontSize: 8,
+                  }}
+                >
+                  Bar {index + 1}
+                </Text>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
+}
+
 export function TimelineStudio({
   jobId,
   config,
@@ -163,7 +539,7 @@ export function TimelineStudio({
 }: {
   jobId: string;
   config: SongConfig;
-  artifacts: { vocal?: string; backing?: string };
+  artifacts: { final?: string; vocal?: string; backing?: string };
   musicParts?: MusicPartFiles;
   trackSettings: TrackMixSettings;
   initialTimeline?: TimelineState;
@@ -178,6 +554,29 @@ export function TimelineStudio({
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [buildingParts, setBuildingParts] = useState(false);
   const [editingAction, setEditingAction] = useState<ClipEditAction | null>(null);
+  const lastPersistedPlayback = useRef(-1);
+
+  let playbackSource: string | null = artifacts.final ?? null;
+  if (!playbackSource) {
+    try {
+      playbackSource = artifactUrl(jobId, "final");
+    } catch {
+      playbackSource = null;
+    }
+  }
+
+  const player = useAudioPlayer(playbackSource, { updateInterval: 100 });
+  const playback = useAudioPlayerStatus(player);
+
+  useEffect(() => {
+    if (!playback.playing) {
+      const seconds = clamp(playback.currentTime || 0, 0, totalSeconds(config));
+      if (Math.abs(seconds - lastPersistedPlayback.current) >= 0.1) {
+        lastPersistedPlayback.current = seconds;
+        setTimeline((current) => ({ ...current, playheadSec: snapTime(seconds) }));
+      }
+    }
+  }, [playback.currentTime, playback.playing, config]);
 
   useEffect(() => {
     if (initialTimeline) setTimeline(initialTimeline);
@@ -188,6 +587,9 @@ export function TimelineStudio({
   }, [timeline, onTimelineChange]);
 
   const total = totalSeconds(config);
+  const displayPlayhead = playback.playing
+    ? clamp(playback.currentTime || 0, 0, total)
+    : timeline.playheadSec;
   const timelineWidth = Math.max(420, total * timeline.zoom);
   const selectedClip = timeline.clips.find((clip) => clip.id === selectedClipId) ?? null;
   const soloExists = TRACKS.some((track) => trackSettings[track.id]?.solo);
@@ -212,24 +614,27 @@ export function TimelineStudio({
     });
   }
 
-  function setPlayhead(seconds: number) {
-    updateTimeline((current) => ({ ...current, playheadSec: seconds }));
-  }
-
-  function snapTime(seconds: number) {
-    return clamp(Math.round(seconds / EDIT_STEP) * EDIT_STEP, 0, total);
-  }
-
-  function clipForTrack(id: TrackId) {
-    return timeline.clips.filter((clip) => clip.trackId === id);
+  function seekAndSetPlayhead(seconds: number) {
+    const target = clamp(snapTime(seconds), 0, total);
+    updateTimeline((current) => ({ ...current, playheadSec: target }));
+    void player.seekTo(target);
   }
 
   function selectAt(seconds: number, trackId: TrackId) {
-    const candidate = clipForTrack(trackId).find(
-      (clip) => seconds >= clip.startSec && seconds <= clip.startSec + clip.durationSec,
+    const candidate = timeline.clips.find(
+      (clip) =>
+        clip.trackId === trackId &&
+        seconds >= clip.startSec &&
+        seconds <= clip.startSec + clip.durationSec,
     );
     setSelectedClipId(candidate?.id ?? null);
-    setPlayhead(seconds);
+    seekAndSetPlayhead(seconds);
+  }
+
+  function selectClip(id: string) {
+    const clip = timeline.clips.find((item) => item.id === id);
+    setSelectedClipId(id);
+    if (clip) seekAndSetPlayhead(clip.startSec);
   }
 
   function updateClip(id: string, patch: Partial<TimelineClip>) {
@@ -239,9 +644,49 @@ export function TimelineStudio({
     }));
   }
 
+  function moveClipDrag(id: string, baseStart: number, deltaSeconds: number) {
+    const clip = timeline.clips.find((item) => item.id === id);
+    if (!clip) return;
+    const nextStart = clamp(
+      snapTime(baseStart + deltaSeconds),
+      0,
+      Math.max(0, total - clip.durationSec),
+    );
+    updateClip(id, { startSec: nextStart });
+  }
+
+  function resizeClipDrag(
+    id: string,
+    baseStart: number,
+    baseDuration: number,
+    edge: "left" | "right",
+    deltaSeconds: number,
+  ) {
+    if (edge === "left") {
+      const nextStart = clamp(
+        snapTime(baseStart + deltaSeconds),
+        0,
+        baseStart + baseDuration - EDIT_STEP,
+      );
+      updateClip(id, {
+        startSec: nextStart,
+        durationSec: Math.max(EDIT_STEP, baseDuration - (nextStart - baseStart)),
+      });
+      return;
+    }
+
+    updateClip(id, {
+      durationSec: clamp(
+        snapTime(baseDuration + deltaSeconds),
+        EDIT_STEP,
+        Math.max(EDIT_STEP, total - baseStart),
+      ),
+    });
+  }
+
   function splitSelected() {
     if (!selectedClip) return;
-    const splitAt = snapTime(timeline.playheadSec);
+    const splitAt = clamp(snapTime(timeline.playheadSec), 0, total);
     const clipEnd = selectedClip.startSec + selectedClip.durationSec;
 
     if (splitAt <= selectedClip.startSec + EDIT_STEP || splitAt >= clipEnd - EDIT_STEP) {
@@ -279,7 +724,6 @@ export function TimelineStudio({
     const maxStart = selectedClip.startSec + selectedClip.durationSec - EDIT_STEP;
     const newStart = clamp(selectedClip.startSec + EDIT_STEP, 0, maxStart);
     const delta = newStart - selectedClip.startSec;
-
     updateClip(selectedClip.id, {
       startSec: newStart,
       durationSec: Math.max(EDIT_STEP, selectedClip.durationSec - delta),
@@ -311,7 +755,7 @@ export function TimelineStudio({
     if (!selectedClip) return;
     updateClip(selectedClip.id, {
       startSec: clamp(
-        selectedClip.startSec + delta,
+        snapTime(selectedClip.startSec + delta),
         0,
         Math.max(0, total - selectedClip.durationSec),
       ),
@@ -321,7 +765,7 @@ export function TimelineStudio({
   function duplicateSelected() {
     if (!selectedClip) return;
     const start = clamp(
-      selectedClip.startSec + selectedClip.durationSec + EDIT_STEP,
+      snapTime(selectedClip.startSec + selectedClip.durationSec + EDIT_STEP),
       0,
       Math.max(0, total - selectedClip.durationSec),
     );
@@ -351,7 +795,6 @@ export function TimelineStudio({
 
   function setFade(kind: "in" | "out") {
     if (!selectedClip || selectedClip.kind !== "audio") return;
-
     if (kind === "in") {
       updateClip(selectedClip.id, { fadeInSec: selectedClip.fadeInSec > 0 ? 0 : 0.5 });
     } else {
@@ -386,14 +829,9 @@ export function TimelineStudio({
         strength: 0.65,
       });
       const localUri = await downloadClipEdit(jobId, result.edit_id, "wav");
-      const editedClip: TimelineClip = {
-        ...selectedClip,
-        sourceUri: localUri,
-        label: `${selectedClip.label} · ${action}`,
-      };
       updateClip(selectedClip.id, {
         sourceUri: localUri,
-        label: editedClip.label,
+        label: `${selectedClip.label} · ${action}`,
       });
       onMessage(`✅ ${action} finished. The selected clip now points to the new local WAV.`);
     } catch (error) {
@@ -488,35 +926,73 @@ export function TimelineStudio({
           07 · Real Timeline + Clip Editor
         </Text>
         <Text selectable style={{ color: "#7f8899", fontSize: 12, lineHeight: 18 }}>
-          Horizontal DAW-style timeline with section markers, playhead, zoom and non-destructive clip edits. Changes are saved locally with the project.
+          Drag clips to move them. Use the left/right handles to trim. Playback playhead follows the master audio clock, and MIDI clips open a piano-roll foundation.
         </Text>
       </View>
 
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <Text selectable style={{ color: "#cbd3df", fontSize: 11, fontWeight: "800" }}>
-          {total.toFixed(1)}s · Zoom {timeline.zoom.toFixed(0)} px/s
-        </Text>
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          <Button label="−" disabled={timeline.zoom <= MIN_ZOOM} onPress={() => updateTimeline((current) => ({ ...current, zoom: current.zoom - ZOOM_STEP }))} />
-          <Button label="100%" onPress={() => updateTimeline((current) => ({ ...current, zoom: 48 }))} active={timeline.zoom === 48} />
-          <Button label="+" disabled={timeline.zoom >= MAX_ZOOM} onPress={() => updateTimeline((current) => ({ ...current, zoom: current.zoom + ZOOM_STEP }))} />
+        <View style={{ gap: 2 }}>
+          <Text selectable style={{ color: "#cbd3df", fontSize: 11, fontWeight: "800" }}>
+            {total.toFixed(1)}s · Zoom {timeline.zoom.toFixed(0)} px/s
+          </Text>
+          <Text selectable style={{ color: playback.playing ? "#dce2ea" : "#697487", fontSize: 9 }}>
+            {displayPlayhead.toFixed(1)}s · {playback.playing ? "PLAYING" : "PAUSED"}
+          </Text>
+        </View>
+        <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <Button
+            label={playback.playing ? "Pause" : "Play"}
+            disabled={!playbackSource}
+            active={playback.playing}
+            onPress={() => {
+              if (!playbackSource) return;
+              if (playback.playing) {
+                player.pause();
+              } else {
+                void player.seekTo(timeline.playheadSec).then(() => player.play());
+              }
+            }}
+          />
+          <Button
+            label="↖ Seek"
+            disabled={!playbackSource}
+            onPress={() => void player.seekTo(timeline.playheadSec)}
+          />
+          <Button
+            label="−"
+            disabled={timeline.zoom <= MIN_ZOOM}
+            onPress={() => updateTimeline((current) => ({ ...current, zoom: current.zoom - ZOOM_STEP }))}
+          />
+          <Button
+            label="100%"
+            onPress={() => updateTimeline((current) => ({ ...current, zoom: 48 }))}
+            active={timeline.zoom === 48}
+          />
+          <Button
+            label="+"
+            disabled={timeline.zoom >= MAX_ZOOM}
+            onPress={() => updateTimeline((current) => ({ ...current, zoom: current.zoom + ZOOM_STEP }))}
+          />
         </View>
       </View>
+
+      {!artifacts.final ? (
+        <Text selectable style={{ color: "#778294", fontSize: 10, lineHeight: 16 }}>
+          Save Final WAV above to enable timeline playback. Editing, clip layout and MIDI tools remain available without it.
+        </Text>
+      ) : null}
 
       <View style={{ borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#292f3c", backgroundColor: "#0d1015" }}>
         <View style={{ flexDirection: "row" }}>
           <View style={{ width: LABEL_W, height: RULER_H, justifyContent: "center", paddingHorizontal: 10, borderRightWidth: 1, borderRightColor: "#252b38" }}>
             <Text selectable style={{ color: "#697487", fontSize: 9, fontWeight: "900" }}>TRACK</Text>
           </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ width: timelineWidth }}
-          >
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <Pressable
               onPress={(event) => {
                 const x = clamp(event.nativeEvent.locationX, 0, timelineWidth);
-                setPlayhead(snapTime(x / timeline.zoom));
+                seekAndSetPlayhead(x / timeline.zoom);
               }}
               style={{ width: timelineWidth, height: RULER_H, justifyContent: "center" }}
             >
@@ -532,24 +1008,19 @@ export function TimelineStudio({
                     backgroundColor: second % 5 === 0 ? "#394251" : "#252b33",
                   }}
                 >
-                  <Text
-                    selectable
-                    style={{
-                      position: "absolute",
-                      top: 3,
-                      left: 4,
-                      color: second % 5 === 0 ? "#a2acbb" : "#596273",
-                      fontSize: 9,
-                    }}
-                  >
-                    {second}s
-                  </Text>
+                  {second % 5 === 0 ? (
+                    <Text selectable style={{ position: "absolute", top: 3, left: 4, color: "#a2acbb", fontSize: 9 }}>
+                      {second}s
+                    </Text>
+                  ) : null}
                 </View>
               ))}
+
               <View
+                pointerEvents="none"
                 style={{
                   position: "absolute",
-                  left: timeline.playheadSec * timeline.zoom - 1,
+                  left: displayPlayhead * timeline.zoom - 1,
                   top: 0,
                   bottom: 0,
                   width: 2,
@@ -578,9 +1049,7 @@ export function TimelineStudio({
                 <Text selectable numberOfLines={1} style={{ color: "#e0e5ed", fontSize: 11, fontWeight: "800" }}>
                   {track.label}
                 </Text>
-                <Text selectable style={{ color: "#5e6878", fontSize: 8 }}>
-                  {track.kind.toUpperCase()}
-                </Text>
+                <Text selectable style={{ color: "#5e6878", fontSize: 8 }}>{track.kind.toUpperCase()}</Text>
               </View>
             ))}
           </View>
@@ -588,8 +1057,8 @@ export function TimelineStudio({
           <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ width: timelineWidth }}>
             <View style={{ width: timelineWidth }}>
               {TRACKS.map((track) => {
-                const clips = clipForTrack(track.id);
-                const current = trackSettings[track.id] ?? defaultSetting(track.id);
+                const clips = timeline.clips.filter((clip) => clip.trackId === track.id);
+                const currentSetting = trackSettings[track.id] ?? defaultSetting(track.id);
 
                 return (
                   <Pressable
@@ -627,50 +1096,26 @@ export function TimelineStudio({
                       </View>
                     ))}
 
-                    {clips.map((clip) => {
-                      const selected = clip.id === selectedClipId;
-                      return (
-                        <Pressable
-                          key={clip.id}
-                          onPress={() => {
-                            setSelectedClipId(clip.id);
-                            setPlayhead(clamp(clip.startSec, 0, total));
-                          }}
-                          style={{
-                            position: "absolute",
-                            left: clip.startSec * timeline.zoom + 3,
-                            top: 11,
-                            width: Math.max(18, clip.durationSec * timeline.zoom - 6),
-                            height: 40,
-                            borderRadius: 7,
-                            paddingHorizontal: 7,
-                            justifyContent: "center",
-                            backgroundColor: selected ? "#eef1f7" : clip.kind === "midi" ? "#263340" : "#2d333e",
-                            borderWidth: 1,
-                            borderColor: selected ? "#ffffff" : "#435064",
-                            opacity: current.muted ? 0.28 : current.solo && soloExists ? 1 : 0.9,
-                          }}
-                        >
-                          <Text selectable numberOfLines={1} style={{ color: selected ? "#0c1016" : "#cbd3df", fontSize: 9, fontWeight: "800" }}>
-                            {clip.kind === "midi" ? "MIDI · " : ""}{clip.label}
-                          </Text>
-                          <Text selectable numberOfLines={1} style={{ color: selected ? "#384354" : "#718096", fontSize: 8 }}>
-                            {clip.durationSec.toFixed(1)}s
-                          </Text>
-                          {clip.kind === "audio" && (clip.fadeInSec > 0 || clip.fadeOutSec > 0) ? (
-                            <Text selectable style={{ position: "absolute", right: 4, bottom: 2, color: selected ? "#4f5969" : "#718096", fontSize: 7 }}>
-                              {clip.fadeInSec > 0 ? "FI " : ""}{clip.fadeOutSec > 0 ? "FO" : ""}
-                            </Text>
-                          ) : null}
-                        </Pressable>
-                      );
-                    })}
+                    {clips.map((clip) => (
+                      <ClipBlock
+                        key={clip.id}
+                        clip={clip}
+                        selected={clip.id === selectedClipId}
+                        current={currentSetting}
+                        soloExists={soloExists}
+                        zoom={timeline.zoom}
+                        total={total}
+                        onSelect={selectClip}
+                        onMove={moveClipDrag}
+                        onResize={resizeClipDrag}
+                      />
+                    ))}
 
                     <View
                       pointerEvents="none"
                       style={{
                         position: "absolute",
-                        left: timeline.playheadSec * timeline.zoom - 1,
+                        left: displayPlayhead * timeline.zoom - 1,
                         top: 0,
                         bottom: 0,
                         width: 2,
@@ -727,20 +1172,12 @@ export function TimelineStudio({
               />
               <Button
                 label={editingAction === "fix-pitch" ? "Fixing Pitch…" : "Fix Pitch"}
-                disabled={
-                  editingAction !== null ||
-                  selectedClip.kind !== "audio" ||
-                  selectedClip.sourceArtifact !== "vocal"
-                }
+                disabled={editingAction !== null || selectedClip.kind !== "audio" || selectedClip.sourceArtifact !== "vocal"}
                 onPress={() => void runClipAIAction("fix-pitch")}
               />
               <Button
                 label={editingAction === "fix-timing" ? "Fixing Timing…" : "Fix Timing"}
-                disabled={
-                  editingAction !== null ||
-                  selectedClip.kind !== "audio" ||
-                  selectedClip.sourceArtifact !== "vocal"
-                }
+                disabled={editingAction !== null || selectedClip.kind !== "audio" || selectedClip.sourceArtifact !== "vocal"}
                 onPress={() => void runClipAIAction("fix-timing")}
               />
               <Button label="Regenerate" disabled onPress={() => undefined} />
@@ -751,69 +1188,48 @@ export function TimelineStudio({
         </View>
       ) : (
         <Text selectable style={{ color: "#667183", fontSize: 11, lineHeight: 17 }}>
-          Tap a clip to select it. Tap the ruler or a track area to move the playhead. Then use split, trim, move, duplicate, fade and delete.
+          Tap a clip to select it. Drag the clip body to move it, or drag the left/right handles to trim.
         </Text>
       )}
 
-      <View style={{ gap: 8 }}>
-        <Text selectable style={{ color: "#8f98aa", fontSize: 10, fontWeight: "900" }}>
-          TRACK CONTROLS
-        </Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {TRACKS.map((track) => {
-            const current = trackSettings[track.id] ?? defaultSetting(track.id);
-            const midiUri = musicParts?.[track.id as keyof MusicPartFiles];
+      {selectedClip?.kind === "midi" && selectedClip.sourcePart ? (
+        <PianoRoll jobId={jobId} clip={selectedClip} bpm={config.bpm ?? 120} />
+      ) : null}
 
-            return (
-              <View
-                key={track.id}
-                style={{
-                  width: "100%",
-                  borderRadius: 12,
-                  backgroundColor: "#0e1117",
-                  borderWidth: 1,
-                  borderColor: current.solo ? "#626d81" : "#252b38",
-                  padding: 9,
-                  gap: 7,
-                }}
-              >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text selectable style={{ color: "#dce2ea", fontSize: 11, fontWeight: "800" }}>
-                      {track.label}
-                    </Text>
-                    <Text selectable style={{ color: "#5e6878", fontSize: 8 }}>
-                      {track.kind === "midi" ? "MIDI lane" : "Audio lane"} · {Math.round(current.volume * 100)}%
-                    </Text>
-                  </View>
-                  <Button label="M" active={current.muted} onPress={() => updateTrack(track.id, { muted: !current.muted })} />
-                  <Button label="S" active={current.solo} onPress={() => updateTrack(track.id, { solo: !current.solo })} />
-                  <Button
-                    label="VOL −"
-                    disabled={current.volume <= 0}
-                    onPress={() =>
-                      updateTrack(track.id, {
-                        volume: Number(Math.max(0, current.volume - 0.1).toFixed(2)),
-                      })
-                    }
-                  />
-                  <Button
-                    label="VOL +"
-                    disabled={current.volume >= 1}
-                    onPress={() =>
-                      updateTrack(track.id, {
-                        volume: Number(Math.min(1, current.volume + 0.1).toFixed(2)),
-                      })
-                    }
-                  />
-                  {midiUri && track.kind === "midi" ? (
-                    <Button label="Share MIDI" onPress={() => void shareMidi(midiUri, track.label)} />
-                  ) : null}
+      <View style={{ gap: 8 }}>
+        <Text selectable style={{ color: "#8f98aa", fontSize: 10, fontWeight: "900" }}>TRACK CONTROLS</Text>
+        {TRACKS.map((track) => {
+          const currentSetting = trackSettings[track.id] ?? defaultSetting(track.id);
+          const midiUri = musicParts?.[track.id as keyof MusicPartFiles];
+
+          return (
+            <View key={track.id} style={{ width: "100%", borderRadius: 12, backgroundColor: "#0e1117", borderWidth: 1, borderColor: currentSetting.solo ? "#626d81" : "#252b38", padding: 9, gap: 7 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text selectable style={{ color: "#dce2ea", fontSize: 11, fontWeight: "800" }}>{track.label}</Text>
+                  <Text selectable style={{ color: "#5e6878", fontSize: 8 }}>
+                    {track.kind === "midi" ? "MIDI lane" : "Audio lane"} · {Math.round(currentSetting.volume * 100)}%
+                  </Text>
                 </View>
+                <Button label="M" active={currentSetting.muted} onPress={() => updateTrack(track.id, { muted: !currentSetting.muted })} />
+                <Button label="S" active={currentSetting.solo} onPress={() => updateTrack(track.id, { solo: !currentSetting.solo })} />
+                <Button
+                  label="VOL −"
+                  disabled={currentSetting.volume <= 0}
+                  onPress={() => updateTrack(track.id, { volume: Number(Math.max(0, currentSetting.volume - 0.1).toFixed(2)) })}
+                />
+                <Button
+                  label="VOL +"
+                  disabled={currentSetting.volume >= 1}
+                  onPress={() => updateTrack(track.id, { volume: Number(Math.min(1, currentSetting.volume + 0.1).toFixed(2)) })}
+                />
+                {midiUri && track.kind === "midi" ? (
+                  <Button label="Share MIDI" onPress={() => void shareMidi(midiUri, track.label)} />
+                ) : null}
               </View>
-            );
-          })}
-        </View>
+            </View>
+          );
+        })}
       </View>
 
       <Button
