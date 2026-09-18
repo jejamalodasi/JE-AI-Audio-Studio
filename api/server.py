@@ -18,6 +18,7 @@ from ai.song_builder import SongSection
 from mixing.mastering import MasteringConfig, master_audio
 from mixing.mixer import mix_audio_arrays
 from music.part_export import build_music_part_midi_bundle
+from music.midi_audio_renderer import render_midi_to_audio
 from utils.audio_utils import load_audio, save_wav
 from vocal.analyzer import analyze_vocal
 from vocal.pitch_correction import PitchCorrectionConfig, correct_pitch
@@ -678,8 +679,12 @@ async def render_timeline(
                 continue
             _, sr = load_clip_source(artifact)
             target_sr = target_sr or sr
+
+        midi_clips = [clip for clip in clips if clip.get("kind") == "midi" and clip.get("sourcePart")]
+        if target_sr is None and not midi_clips:
+            raise HTTPException(status_code=400, detail="Timeline needs at least one audio or MIDI clip")
         if target_sr is None:
-            raise HTTPException(status_code=400, detail="Audio clips need vocal/backing source artifacts")
+            target_sr = 44100
         import librosa
 
         def to_stereo(audio: np.ndarray) -> np.ndarray:
@@ -741,6 +746,51 @@ async def render_timeline(
 
             piece *= envelope[:, None] * track_gain
             mix[dest_start:dest_start + source_len] += piece
+
+        midi_dir = Path(job["result"]["final_path"]).parent / "timeline_renders" / "midi"
+        midi_dir.mkdir(parents=True, exist_ok=True)
+        bpm = float(payload.get("bpm", 120.0))
+        for index, clip in enumerate(midi_clips):
+            track_id = str(clip.get("trackId", ""))
+            if solo_tracks and track_id not in solo_tracks:
+                continue
+            setting = track_mix.get(track_id, {})
+            track_gain = gain_from_setting(setting)
+            if track_gain <= 0:
+                continue
+            part = str(clip.get("sourcePart", "")).strip().lower()
+            midi_path = (job.get("midi_edits") or {}).get(part, {}).get("path")
+            if not midi_path:
+                midi_path = ((job.get("parts") or {}).get("parts") or {}).get(part)
+            if not midi_path:
+                continue
+            render_path = midi_dir / f"{index}_{part}.wav"
+            render_midi_to_audio(str(midi_path), str(render_path), bpm=bpm, sample_rate=target_sr)
+            midi_audio, midi_sr = load_audio(str(render_path), mono=False)
+            midi_audio = to_stereo(np.asarray(midi_audio, dtype=np.float32))
+            if midi_sr != target_sr:
+                midi_audio = np.column_stack([
+                    librosa.resample(midi_audio[:, ch], orig_sr=midi_sr, target_sr=target_sr)
+                    for ch in range(2)
+                ]).astype(np.float32)
+            start_sec = max(0.0, float(clip.get("startSec", 0.0)))
+            offset_sec = max(0.0, float(clip.get("sourceOffsetSec", 0.0)))
+            duration_sec = max(0.0, float(clip.get("durationSec", 0.0)))
+            source_start = min(midi_audio.shape[0], int(round(offset_sec * target_sr)))
+            source_len = min(int(round(duration_sec * target_sr)), midi_audio.shape[0] - source_start)
+            dest_start = int(round(start_sec * target_sr))
+            if source_len <= 0 or dest_start >= length:
+                continue
+            source_len = min(source_len, length - dest_start)
+            piece = midi_audio[source_start:source_start + source_len].astype(np.float64)
+            fade_in = min(source_len, int(round(max(0.0, float(clip.get("fadeInSec", 0.0))) * target_sr)))
+            fade_out = min(source_len, int(round(max(0.0, float(clip.get("fadeOutSec", 0.0))) * target_sr)))
+            envelope = np.ones(source_len, dtype=np.float64)
+            if fade_in > 1:
+                envelope[:fade_in] *= np.linspace(0.0, 1.0, fade_in, endpoint=True)
+            if fade_out > 1:
+                envelope[-fade_out:] *= np.linspace(1.0, 0.0, fade_out, endpoint=True)
+            mix[dest_start:dest_start + source_len] += piece * envelope[:, None] * track_gain
 
         peak = float(np.max(np.abs(mix))) if mix.size else 0.0
         if peak > 1.0:
