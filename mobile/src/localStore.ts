@@ -27,6 +27,7 @@ export type LocalProject = {
     backing?: string;
     bundle?: string;
     remix?: string;
+    timeline?: string;
   };
   musicParts?: MusicPartFiles;
   trackMix?: TrackMixSettings;
