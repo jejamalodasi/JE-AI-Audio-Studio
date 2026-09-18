@@ -28,6 +28,7 @@ The project now has a crash-resistant Gradio workspace plus lightweight DSP, neu
 - Full multi-track MIDI arrangement rendering
 - General MIDI percussion-name mapping and Channel 10 drum rendering
 - Optional stem separation backend
+- **FastAPI service** with health, audio analysis, async song-generation jobs and artifact download endpoints for future Web/Android clients
 - Lightweight multi-track audio mixing
 - Conservative master-bus compression, saturation and peak limiting
 - WAV and MIDI export
@@ -116,6 +117,15 @@ pip install -r requirements-ai.txt
 python app.py
 ```
 
+For the optional HTTP API:
+
+```bash
+pip install -r requirements-api.txt
+uvicorn api.server:app --host 0.0.0.0 --port 8000
+```
+
+API endpoints include `GET /health`, `POST /api/analyze`, `POST /api/jobs/song`, `GET /api/jobs/{job_id}`, and artifact downloads under `/api/jobs/{job_id}/download/{artifact}`. The song endpoint returns `202 Accepted` and processes the heavy generation job in a worker thread.
+
 ## Project structure
 
 ```text
@@ -139,6 +149,9 @@ JE-AI-Audio-Studio/
 │   ├── song_builder.py
 │   ├── vocal_to_melody.py
 │   └── vocal_to_music.py
+├── api/
+│   ├── __init__.py
+│   └── server.py
 ├── vocal/
 ├── separation/
 ├── music/
