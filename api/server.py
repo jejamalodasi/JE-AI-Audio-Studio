@@ -534,3 +534,76 @@ def download_clip_edit(job_id: str, edit_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="Clip edit file not found")
 
     return FileResponse(path=str(path), filename=path.name, media_type="audio/wav")
+
+
+@app.get(f"{API_PREFIX}/jobs/{{job_id}}/midi/{{part}}")
+def get_midi_notes(job_id: str, part: str) -> JSONResponse:
+    job = _completed_job(job_id)
+    part = str(part).strip().lower()
+    allowed = {"melody", "chords", "bass", "drums", "rhythm", "arrangement"}
+    if part not in allowed:
+        raise HTTPException(status_code=400, detail="Unknown MIDI part")
+
+    parts = (job.get("parts") or {}).get("parts") or {}
+    part_path = parts.get(part)
+    if not part_path:
+        raise HTTPException(status_code=404, detail="MIDI part has not been generated yet")
+
+    midi_path = Path(part_path)
+    if not midi_path.exists():
+        raise HTTPException(status_code=404, detail="MIDI file not found")
+
+    try:
+        import mido
+
+        midi = mido.MidiFile(str(midi_path))
+        notes: list[dict[str, Any]] = []
+        for track in midi.tracks:
+            absolute = 0
+            active: dict[tuple[int, int], list[tuple[int, int]]] = {}
+            track_name = ""
+            for message in track:
+                absolute += int(message.time)
+                if message.type == "track_name":
+                    track_name = str(message.name)
+                    continue
+                if message.type not in {"note_on", "note_off"}:
+                    continue
+
+                note = int(getattr(message, "note", -1))
+                channel = int(getattr(message, "channel", 0))
+                velocity = int(getattr(message, "velocity", 0))
+                key = (channel, note)
+
+                if message.type == "note_on" and velocity > 0:
+                    active.setdefault(key, []).append((absolute, velocity))
+                    continue
+
+                queued = active.get(key)
+                if not queued:
+                    continue
+                start_tick, start_velocity = queued.pop(0)
+                if absolute > start_tick:
+                    notes.append(
+                        {
+                            "note": note,
+                            "velocity": start_velocity,
+                            "startBeat": float(start_tick / midi.ticks_per_beat),
+                            "durationBeat": float((absolute - start_tick) / midi.ticks_per_beat),
+                            "trackName": track_name or None,
+                        }
+                    )
+                if not queued:
+                    active.pop(key, None)
+
+        notes = [note for note in notes if note["durationBeat"] > 0][:3000]
+        notes.sort(key=lambda item: (item["startBeat"], item["note"]))
+        return JSONResponse(
+            content={
+                "part": part,
+                "ticksPerBeat": midi.ticks_per_beat,
+                "notes": notes,
+            }
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}") from exc
