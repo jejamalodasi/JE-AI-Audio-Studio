@@ -56,7 +56,7 @@ export function artifactUrl(jobId: string, artifact: "final" | "vocal" | "backin
 
 export async function downloadArtifact(
   jobId: string,
-  artifact: "final" | "vocal" | "backing" | "bundle" | "remix",
+  artifact: "final" | "vocal" | "backing" | "bundle" | "remix" | "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement",
   extension: string,
 ) {
   const exportDirectory = new Directory(Paths.document, "exports");
@@ -100,6 +100,47 @@ export async function remixSongJob(
 
   const response = await fetch(
     `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/remix`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}
+
+
+export type MusicPartsResult = {
+  job_id: string;
+  status: "completed";
+  parts: Record<"melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement", string>;
+  bpm: number;
+  key: string;
+  scale: string;
+  bars: number;
+  seed: number;
+};
+
+export async function generateMusicParts(
+  jobId: string,
+  values: {
+    bpm: number;
+    key: string;
+    scale: string;
+    bars: number;
+    seed: number;
+  },
+): Promise<MusicPartsResult> {
+  requireApiUrl();
+  const form = new FormData();
+  form.append("bpm", String(values.bpm));
+  form.append("key", values.key);
+  form.append("scale", values.scale);
+  form.append("bars", String(values.bars));
+  form.append("seed", String(values.seed));
+
+  const response = await fetch(
+    `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/parts`,
     {
       method: "POST",
       body: form,
