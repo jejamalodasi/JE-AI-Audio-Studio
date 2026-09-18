@@ -1,6 +1,6 @@
 import Storage from "expo-sqlite/kv-store";
 
-import type { PickedAudio, SongConfig, SongJob } from "./types";
+import type { MusicPartFiles, PickedAudio, SongConfig, SongJob, TrackMixSettings } from "./types";
 
 const DRAFT_KEY = "je-ai-audio-studio:draft:v1";
 const PROJECTS_KEY = "je-ai-audio-studio:projects:v1";
@@ -19,7 +19,10 @@ export type LocalProject = {
     vocal?: string;
     backing?: string;
     bundle?: string;
+    remix?: string;
   };
+  musicParts?: MusicPartFiles;
+  trackMix?: TrackMixSettings;
 };
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
