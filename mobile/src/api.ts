@@ -1,4 +1,4 @@
-import { File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 import type { PickedAudio, SongConfig, SongJob } from "./types";
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/$/, "");
@@ -59,8 +59,11 @@ export async function downloadArtifact(
   artifact: "final" | "vocal" | "backing" | "bundle",
   extension: string,
 ) {
+  const exportDirectory = new Directory(Paths.document, "exports");
+  exportDirectory.create({ idempotent: true, intermediates: true });
+
   const filename = `je_ai_${artifact}_${Date.now()}.${extension}`;
-  const destination = new File(Paths.cache, filename);
+  const destination = new File(exportDirectory, filename);
   const downloaded = await File.downloadFileAsync(
     artifactUrl(jobId, artifact),
     destination,
