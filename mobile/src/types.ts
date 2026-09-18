@@ -8,6 +8,7 @@ export type SongJob = {
   job_id: string;
   status: "queued" | "running" | "completed" | "failed";
   stage?: string;
+  progress?: number;
   error?: string;
   artifacts?: {
     final: string;
