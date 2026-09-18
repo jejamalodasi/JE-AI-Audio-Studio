@@ -123,13 +123,9 @@ export function TimelineStudio({
       });
 
       const downloaded: typeof result.parts = { ...result.parts };
-      const entries = Object.entries(result.parts) as Array<[keyof typeof result.parts, string]>;
-      for (const [kind, url] of entries) {
-        try {
-          downloaded[kind] = await downloadArtifact(jobId, kind, "mid");
-        } catch {
-          downloaded[kind] = url;
-        }
+      const entries = Object.keys(result.parts) as Array<keyof typeof result.parts>;
+      for (const kind of entries) {
+        downloaded[kind] = await downloadArtifact(jobId, kind, "mid");
       }
 
       onMusicPartsChange(downloaded);
