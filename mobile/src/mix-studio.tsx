@@ -1,6 +1,6 @@
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import * as Sharing from "expo-sharing";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
 import { remixSongJob, downloadArtifact } from "./api";
@@ -74,6 +74,16 @@ function TrackStrip({
   };
 
   const playing = status.playing && active;
+
+  useEffect(() => {
+    player.volume = muted ? 0 : volume;
+  }, [muted, player, volume]);
+
+  useEffect(() => {
+    if (!active && status.playing) {
+      player.pause();
+    }
+  }, [active, player, status.playing]);
 
   return (
     <View
