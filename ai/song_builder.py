@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import tempfile
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 import zipfile
 
 import numpy as np
@@ -164,6 +164,7 @@ def build_song_sketch(
     prompt_audio_path: str,
     config: SongBuilderConfig | None = None,
     output_path: str | None = None,
+    progress_callback: Callable[[float, str], None] | None = None,
 ) -> dict[str, Any]:
     if not prompt_audio_path:
         raise ValueError("prompt_audio_path is required")
@@ -186,12 +187,20 @@ def build_song_sketch(
         else source.with_name(f"{source.stem}_ai_song_sketch.zip")
     )
 
+    if progress_callback:
+        progress_callback(0.0, "starting")
+
     with tempfile.TemporaryDirectory(prefix="je_song_builder_") as tmp:
         work_dir = Path(tmp)
         reference_path = _prepare_reference(str(source), work_dir)
         chain_reference = reference_path
 
         for index, section in enumerate(sections):
+            if progress_callback:
+                progress_callback(
+                    5.0 + (index / max(1, len(sections))) * 70.0,
+                    f"generating {section.name}",
+                )
             section_seed = int(cfg.seed) + index
             prompt = _build_prompt(cfg, section, index, len(sections))
             section_file = work_dir / f"{index + 1:02d}_{section.name.lower()}_musicgen.wav"
