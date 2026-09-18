@@ -8,7 +8,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "expo": "~57.0.0",
