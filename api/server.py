@@ -281,5 +281,11 @@ def download_song_artifact(job_id: str, artifact: str) -> FileResponse:
     return FileResponse(
         path=str(path),
         filename=path.name,
-        media_type="application/zip" if path.suffix == ".zip" else "audio/wav",
+        media_type=(
+            "application/zip"
+            if path.suffix == ".zip"
+            else "audio/midi"
+            if path.suffix.lower() in {".mid", ".midi"}
+            else "audio/wav"
+        ),
     )
