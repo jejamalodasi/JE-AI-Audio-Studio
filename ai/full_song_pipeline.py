@@ -166,9 +166,11 @@ def build_full_song_pipeline(
             max_total_seconds=float(cfg.max_total_seconds),
         )
 
+        backing_sketch_path = work_dir / "ai_backing_sketch.wav"
         song_result = build_song_sketch(
             str(cleaned_path),
             config=song_cfg,
+            output_path=str(backing_sketch_path),
         )
         backing_audio, backing_sr = load_audio(song_result["output_path"], mono=False)
 
