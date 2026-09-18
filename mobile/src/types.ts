@@ -74,6 +74,14 @@ export type TimelineClip = {
   fadeOutSec: number;
 };
 
+export type MidiNote = {
+  note: number;
+  velocity: number;
+  startBeat: number;
+  durationBeat: number;
+  trackName?: string;
+};
+
 export type TimelineState = {
   clips: TimelineClip[];
   playheadSec: number;
