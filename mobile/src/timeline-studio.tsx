@@ -138,6 +138,7 @@ function defaultTimeline(
       label: "Vocal",
       startSec: 0,
       durationSec: total,
+      sourceOffsetSec: 0,
       sourceUri: artifacts.vocal,
       sourceArtifact: "vocal",
       fadeInSec: 0,
@@ -153,6 +154,7 @@ function defaultTimeline(
       label: "AI Backing",
       startSec: 0,
       durationSec: total,
+      sourceOffsetSec: 0,
       sourceUri: artifacts.backing,
       sourceArtifact: "backing",
       fadeInSec: 0,
@@ -631,6 +633,7 @@ export function TimelineStudio({
   onTimelineChange,
   onTrackSettingsChange,
   onMusicPartsChange,
+  onTimelineRendered,
   onMessage,
 }: {
   jobId: string;
@@ -642,6 +645,7 @@ export function TimelineStudio({
   onTimelineChange: (timeline: TimelineState) => void;
   onTrackSettingsChange: (settings: TrackMixSettings) => void;
   onMusicPartsChange: (parts: MusicPartFiles) => void;
+  onTimelineRendered: (uri: string) => void;
   onMessage: (message: string) => void;
 }) {
   const [timeline, setTimeline] = useState<TimelineState>(
@@ -650,6 +654,7 @@ export function TimelineStudio({
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [buildingParts, setBuildingParts] = useState(false);
   const [editingAction, setEditingAction] = useState<ClipEditAction | null>(null);
+  const [renderingTimeline, setRenderingTimeline] = useState(false);
   const lastPersistedPlayback = useRef(-1);
 
   let playbackSource: string | null = artifacts.final ?? null;
@@ -1006,6 +1011,33 @@ export function TimelineStudio({
     }
   }
 
+  async function renderCurrentTimeline() {
+    if (renderingTimeline) return;
+    if (!timeline.clips.some((clip) => clip.kind === "audio" && clip.durationSec > 0)) {
+      onMessage("Add at least one audio clip before rendering the timeline.");
+      return;
+    }
+
+    setRenderingTimeline(true);
+    onMessage("Rendering edited timeline to WAV…");
+    try {
+      await renderTimeline(jobId, {
+        timeline,
+        trackMix: trackSettings,
+        targetPeak: 0.95,
+        compressionRatio: 2,
+        saturation: 0.08,
+      });
+      const uri = await downloadArtifact(jobId, "timeline", "wav");
+      onTimelineRendered(uri);
+      onMessage("✅ Timeline rendered to a new WAV and saved locally.");
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : "Timeline render failed.");
+    } finally {
+      setRenderingTimeline(false);
+    }
+  }
+
   async function shareMidi(uri: string, label: string) {
     try {
       if (!(await Sharing.isAvailableAsync())) {
@@ -1343,11 +1375,19 @@ export function TimelineStudio({
         })}
       </View>
 
-      <Button
-        label={buildingParts ? "Generating MIDI…" : musicParts?.arrangement ? "Regenerate MIDI Parts" : "Generate MIDI Parts"}
-        disabled={buildingParts}
-        onPress={() => void createParts()}
-      />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        <Button
+          label={renderingTimeline ? "Rendering WAV…" : "Render Timeline → WAV"}
+          disabled={renderingTimeline}
+          onPress={() => void renderCurrentTimeline()}
+          active={!renderingTimeline}
+        />
+        <Button
+          label={buildingParts ? "Generating MIDI…" : musicParts?.arrangement ? "Regenerate MIDI Parts" : "Generate MIDI Parts"}
+          disabled={buildingParts}
+          onPress={() => void createParts()}
+        />
+      </View>
     </View>
   );
 }
