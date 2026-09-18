@@ -4,6 +4,7 @@ from .arrangement_generator import AIConditionedArrangementConfig, generate_ai_c
 from .basic_pitch_transcriber import transcribe_with_basic_pitch
 from .conditioned_music import ConditionedMusicConfig, condition_vocal_to_music
 from .musicgen_melody import MusicGenConfig, generate_musicgen_melody
+from .full_song_pipeline import FullSongPipelineConfig, build_full_song_pipeline
 from .neural_vocal_enhancement import enhance_vocal_neural
 from .pitch_timing_ai import (
     PitchTimingAIConfig,
@@ -23,6 +24,8 @@ __all__ = [
     "condition_vocal_to_music",
     "MusicGenConfig",
     "generate_musicgen_melody",
+    "FullSongPipelineConfig",
+    "build_full_song_pipeline",
     "enhance_vocal_neural",
     "PitchTimingAIConfig",
     "analyze_pitch_neural",
