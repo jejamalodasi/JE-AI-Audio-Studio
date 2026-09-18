@@ -67,6 +67,7 @@ export type TimelineClip = {
   label: string;
   startSec: number;
   durationSec: number;
+  sourceOffsetSec: number;
   sourceUri?: string;
   sourceArtifact?: "vocal" | "backing";
   sourcePart?: "melody" | "chords" | "bass" | "drums" | "rhythm";
