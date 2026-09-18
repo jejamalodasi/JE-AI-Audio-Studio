@@ -21,6 +21,8 @@ The project now has a crash-resistant Gradio workspace plus lightweight DSP, neu
 - Optional neural AI MIDI transcription with Spotify Basic Pitch
 - **AI Conditioned Arrangement**: vocal-conditioned tempo/key/activity → melody + rhythm + chords + bass + drums
 - **AI Music Generator**: optional MusicGen Melody text + audio-conditioned short music synthesis
+- **AI Song Builder**: Intro / Verse / Chorus / Bridge / Outro section generation with continuity controls, crossfade and section bundle export
+- **Full AI Song Pipeline**: vocal cleanup → AI backing → vocal/backing mix → conservative master → final WAV + project ZIP
 - **AI Song Builder**: section-by-section Intro → Verse → Chorus → Bridge → Outro sketch generation with crossfades, continuity mode, seeds and a remixable ZIP bundle
 - Vocal → Music Parts: rhythm, chords, bass and drums
 - Full multi-track MIDI arrangement rendering
@@ -130,6 +132,8 @@ JE-AI-Audio-Studio/
 │   ├── basic_pitch_transcriber.py
 │   ├── conditioned_music.py
 │   ├── musicgen_melody.py
+│   ├── song_builder.py
+│   ├── full_song_pipeline.py
 │   ├── neural_vocal_enhancement.py
 │   ├── pitch_timing_ai.py
 │   ├── song_builder.py
