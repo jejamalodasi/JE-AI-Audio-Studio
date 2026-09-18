@@ -20,6 +20,7 @@ import {
   healthCheck,
 } from "../src/api";
 import { StudioControls } from "../src/studio-controls";
+import { MixStudio } from "../src/mix-studio";
 import {
   clearDraft,
   loadDraft,
@@ -589,6 +590,24 @@ export default function HomeScreen() {
 
       {localArtifacts?.final && new File(localArtifacts.final).exists ? (
         <AudioPreview uri={localArtifacts.final} />
+      ) : null}
+
+      {completed && job?.job_id ? (
+        <MixStudio
+          jobId={job.job_id}
+          artifacts={localArtifacts}
+          vocalGain={config.vocal_gain_db}
+          backingGain={config.music_gain_db}
+          targetPeak={config.target_peak}
+          compressionRatio={config.compression_ratio}
+          saturation={config.saturation}
+          onRemixSaved={(uri) => {
+            const nextArtifacts = { ...localArtifacts, remix: uri };
+            setLocalArtifacts(nextArtifacts);
+            void persistHistory(job, nextArtifacts);
+          }}
+          onMessage={setMessage}
+        />
       ) : null}
 
       <Card>
