@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import zipfile
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -121,6 +121,7 @@ def build_full_song_pipeline(
     prompt_audio_path: str,
     config: FullSongPipelineConfig | None = None,
     output_path: str | None = None,
+    progress_callback: Callable[[float, str], None] | None = None,
 ) -> dict[str, Any]:
     """Run vocal cleanup, AI backing generation, vocal/backing mix, mastering and packaging.
 
@@ -139,11 +140,18 @@ def build_full_song_pipeline(
     if not selected_sections:
         raise ValueError("At least one song section is required.")
 
+    if progress_callback:
+        progress_callback(0.0, "starting")
+
     with tempfile.TemporaryDirectory(prefix="je_full_song_") as tmp:
         work_dir = Path(tmp)
 
         source_audio, source_sr = load_audio(str(source), mono=False)
+        if progress_callback:
+            progress_callback(5.0, "loading source")
         cleaned = _clean_vocal(source_audio, source_sr, cfg.cleanup_mode)
+        if progress_callback:
+            progress_callback(12.0, "vocal cleanup")
         cleaned_path = work_dir / "vocal_cleaned.wav"
         save_wav(cleaned, source_sr, str(cleaned_path))
 
@@ -171,6 +179,12 @@ def build_full_song_pipeline(
             str(cleaned_path),
             config=song_cfg,
             output_path=str(backing_sketch_path),
+            progress_callback=(
+                lambda value, stage: progress_callback(
+                    15.0 + float(value) * 0.65,
+                    f"AI backing: {stage}",
+                )
+            ) if progress_callback else None,
         )
         backing_audio, backing_sr = load_audio(song_result["output_path"], mono=False)
 
@@ -181,6 +195,8 @@ def build_full_song_pipeline(
             [vocal_audio, backing_audio],
             gains_db=[float(cfg.vocal_gain_db), float(cfg.music_gain_db)],
         )
+        if progress_callback:
+            progress_callback(84.0, "mixing vocal + backing")
         mastered = master_audio(
             mixed,
             MasteringConfig(
@@ -201,6 +217,8 @@ def build_full_song_pipeline(
         backing_path = final_path.with_name(f"{final_path.stem}_backing.wav")
         vocal_path = final_path.with_name(f"{final_path.stem}_vocal_cleaned.wav")
 
+        if progress_callback:
+            progress_callback(92.0, "mastering final mix")
         save_wav(mastered, backing_sr, str(final_path))
         save_wav(backing_audio, backing_sr, str(backing_path))
         save_wav(vocal_audio, backing_sr, str(vocal_path))
@@ -263,6 +281,9 @@ def build_full_song_pipeline(
             with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
                 for file in bundle_dir.iterdir():
                     bundle.write(file, arcname=file.name)
+
+    if progress_callback:
+        progress_callback(100.0, "complete")
 
     return {
         "final_path": str(final_path),
