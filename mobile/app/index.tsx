@@ -1,5 +1,6 @@
 import * as DocumentPicker from "expo-document-picker";
 import { useAudioPlayer } from "expo-audio";
+import { Directory, File, Paths } from "expo-file-system";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -18,6 +19,14 @@ import {
   getSongJob,
   healthCheck,
 } from "../src/api";
+import {
+  loadDraft,
+  loadProjects,
+  saveDraft,
+  upsertProject,
+  removeProject,
+  type LocalProject,
+} from "../src/localStore";
 import type { PickedAudio, SongConfig, SongJob } from "../src/types";
 
 const DEFAULT_CONFIG: SongConfig = {
@@ -45,6 +54,15 @@ const DEFAULT_CONFIG: SongConfig = {
   saturation: 0.08,
   device: "auto",
 };
+
+function newProjectId() {
+  return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function projectTitle(file?: PickedAudio | null) {
+  const name = file?.name || "Untitled AI Song";
+  return name.replace(/\.[^/.]+$/, "") || "Untitled AI Song";
+}
 
 function Card({ children }: { children: ReactNode }) {
   return (
@@ -102,19 +120,49 @@ function ActionButton({
   );
 }
 
+function TinyButton({
+  label,
+  onPress,
+  danger,
+}: {
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: danger ? "#5d3239" : "#303747",
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+      }}
+    >
+      <Text style={{ color: danger ? "#ff9b9b" : "#c7cfdd", fontSize: 11, fontWeight: "800" }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function AudioPreview({ uri }: { uri: string }) {
   const player = useAudioPlayer(uri);
 
   return (
-    <View style={{ gap: 10 }}>
-      <Text selectable style={{ color: "#aab2c0", fontSize: 13 }}>
-        Local final master preview
+    <Card>
+      <Text selectable style={{ color: "#f5f7fb", fontSize: 17, fontWeight: "800" }}>
+        Final Master Preview
+      </Text>
+      <Text selectable style={{ color: "#8f98aa", fontSize: 13 }}>
+        Saved locally on this device.
       </Text>
       <View style={{ flexDirection: "row", gap: 10 }}>
         <ActionButton label="▶ Play" onPress={() => player.play()} />
         <ActionButton label="⏸ Pause" onPress={() => player.pause()} secondary />
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -123,16 +171,94 @@ export default function HomeScreen() {
   const [file, setFile] = useState<PickedAudio | null>(null);
   const [config, setConfig] = useState<SongConfig>(DEFAULT_CONFIG);
   const [job, setJob] = useState<SongJob | null>(null);
+  const [projects, setProjects] = useState<LocalProject[]>([]);
+  const [localArtifacts, setLocalArtifacts] = useState<LocalProject["localArtifacts"]>({});
+  const [projectId, setProjectId] = useState(newProjectId());
+  const [createdAt, setCreatedAt] = useState(new Date().toISOString());
   const [message, setMessage] = useState("Select a vocal, then build your song.");
   const [busy, setBusy] = useState(false);
-  const [downloadedUri, setDownloadedUri] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  function projectSnapshot(
+    nextJob: SongJob | undefined = job ?? undefined,
+    nextArtifacts = localArtifacts,
+  ): LocalProject {
+    const now = new Date().toISOString();
+    return {
+      id: projectId,
+      title: projectTitle(file),
+      createdAt,
+      updatedAt: now,
+      source: file ?? undefined,
+      config,
+      job: nextJob,
+      localArtifacts: nextArtifacts,
+    };
+  }
+
+  async function persistHistory(
+    nextJob: SongJob | undefined = job ?? undefined,
+    nextArtifacts = localArtifacts,
+  ) {
+    const snapshot = projectSnapshot(nextJob, nextArtifacts);
+    await upsertProject(snapshot);
+    const nextProjects = await loadProjects();
+    setProjects(nextProjects);
+  }
+
   useEffect(() => {
+    let active = true;
+
+    async function restoreLocalState() {
+      const [draft, savedProjects] = await Promise.all([loadDraft(), loadProjects()]);
+      if (!active) return;
+
+      setProjects(savedProjects);
+
+      if (draft) {
+        setProjectId(draft.id);
+        setCreatedAt(draft.createdAt);
+        setFile(draft.source ?? null);
+        setConfig(draft.config);
+        setJob(draft.job ?? null);
+        setLocalArtifacts(draft.localArtifacts ?? {});
+
+        const sourceUri = draft.source?.uri;
+        const sourceExists = sourceUri ? new File(sourceUri).exists : false;
+        if (!draft.source || sourceExists) {
+          setMessage("✅ Local draft restored.");
+        } else {
+          setFile(null);
+          setMessage("Saved project restored, but its source file is no longer on the device.");
+        }
+      }
+
+      setHydrated(true);
+    }
+
+    restoreLocalState().catch((error) => {
+      if (active) {
+        setHydrated(true);
+        setMessage(error instanceof Error ? error.message : "Could not restore local projects.");
+      }
+    });
+
     return () => {
+      active = false;
       if (pollTimer.current) clearTimeout(pollTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const timer = setTimeout(() => {
+      void saveDraft(projectSnapshot());
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [hydrated, file, config, job, localArtifacts, projectId, createdAt]);
 
   const completed = job?.status === "completed";
   const running = job?.status === "queued" || job?.status === "running";
@@ -156,16 +282,28 @@ export default function HomeScreen() {
       if (result.canceled || !result.assets?.[0]) return;
 
       const asset = result.assets[0];
-      setFile({
-        uri: asset.uri,
+      const sourceDirectory = new Directory(Paths.document, "projects", "sources");
+      sourceDirectory.create({ idempotent: true, intermediates: true });
+
+      const safeName = (asset.name || "vocal.wav").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const persistentSource = new File(sourceDirectory, `${Date.now()}-${safeName}`);
+      await new File(asset.uri).copy(persistentSource);
+
+      const persistentFile: PickedAudio = {
+        uri: persistentSource.uri,
         name: asset.name || "vocal.wav",
         mimeType: asset.mimeType,
-      });
+      };
+
+      const nextId = newProjectId();
+      setProjectId(nextId);
+      setCreatedAt(new Date().toISOString());
+      setFile(persistentFile);
       setJob(null);
-      setDownloadedUri(null);
-      setMessage("Reference loaded. Ready for generation.");
+      setLocalArtifacts({});
+      setMessage("✅ Reference copied to persistent app storage. Draft auto-save is on.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not select the file.");
+      setMessage(error instanceof Error ? error.message : "Could not select and save the file.");
     }
   }
 
@@ -185,10 +323,11 @@ export default function HomeScreen() {
       try {
         const next = await getSongJob(jobId);
         setJob(next);
+        void persistHistory(next, localArtifacts);
 
         if (next.status === "completed") {
           setBusy(false);
-          setMessage("✅ Full AI Song is ready.");
+          setMessage("✅ Full AI Song is ready and the project history is updated.");
           return;
         }
 
@@ -205,7 +344,7 @@ export default function HomeScreen() {
       }
     };
 
-    tick();
+    void tick();
   }
 
   async function buildSong() {
@@ -216,12 +355,19 @@ export default function HomeScreen() {
 
     setBusy(true);
     setJob(null);
-    setDownloadedUri(null);
+    setLocalArtifacts({});
     setMessage("Uploading reference…");
 
     try {
       const created = await createSongJob(file, config);
-      setMessage(`Job ${created.job_id.slice(0, 8)} queued…`);
+      const createdJob: SongJob = {
+        job_id: created.job_id,
+        status: created.status === "running" ? "running" : "queued",
+        progress: 0,
+      };
+      setJob(createdJob);
+      await persistHistory(createdJob, {});
+      setMessage(`Job ${created.job_id.slice(0, 8)} queued and saved locally…`);
       pollJob(created.job_id);
     } catch (error) {
       setBusy(false);
@@ -229,27 +375,57 @@ export default function HomeScreen() {
     }
   }
 
-  async function downloadFinal() {
+  async function saveArtifact(
+    artifact: "final" | "vocal" | "backing" | "bundle",
+    extension: string,
+  ) {
     if (!job?.job_id) return;
+
     try {
-      setMessage("Downloading final master…");
-      const uri = await downloadArtifact(job.job_id, "final", "wav");
-      setDownloadedUri(uri);
-      setMessage("✅ Final master downloaded.");
+      setMessage(`Downloading ${artifact}…`);
+      const uri = await downloadArtifact(job.job_id, artifact, extension);
+      const nextArtifacts = { ...localArtifacts, [artifact]: uri };
+      setLocalArtifacts(nextArtifacts);
+      await persistHistory(job, nextArtifacts);
+      if (artifact === "final") setMessage("✅ Final master saved to device.");
+      else if (artifact === "bundle") setMessage("✅ Project ZIP saved to device.");
+      else setMessage(`✅ ${artifact} audio saved to device.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Download failed.");
     }
   }
 
-  async function downloadBundle() {
-    if (!job?.job_id) return;
-    try {
-      setMessage("Downloading project bundle…");
-      const uri = await downloadArtifact(job.job_id, "bundle", "zip");
-      setDownloadedUri(uri);
-      setMessage("✅ Project ZIP downloaded.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Bundle download failed.");
+  async function openProject(saved: LocalProject) {
+    setProjectId(saved.id);
+    setCreatedAt(saved.createdAt);
+    setConfig(saved.config);
+    setJob(saved.job ?? null);
+    setLocalArtifacts(saved.localArtifacts ?? {});
+
+    if (saved.source?.uri && new File(saved.source.uri).exists) {
+      setFile(saved.source);
+    } else {
+      setFile(null);
+    }
+
+    const savedFinal = saved.localArtifacts?.final;
+    setMessage(savedFinal && new File(savedFinal).exists ? "✅ Project opened with local master." : "✅ Project opened.");
+
+    if (saved.job?.status === "queued" || saved.job?.status === "running") {
+      setBusy(true);
+      pollJob(saved.job.job_id);
+    } else {
+      setBusy(false);
+    }
+  }
+
+  async function deleteSavedProject(id: string) {
+    await removeProject(id);
+    setProjects((current) => current.filter((project) => project.id !== id));
+    if (id === projectId) {
+      setJob(null);
+      setLocalArtifacts({});
+      setMessage("Local project removed from history. Source/export files are kept.");
     }
   }
 
@@ -270,6 +446,19 @@ export default function HomeScreen() {
         <Text selectable style={{ color: "#8f98aa", fontSize: 14, lineHeight: 20 }}>
           Vocal → AI arrangement → mix → master
         </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
+          <View
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 8,
+              backgroundColor: hydrated ? "#7ee787" : "#f5c26b",
+            }}
+          />
+          <Text selectable style={{ color: "#aab2c0", fontSize: 12 }}>
+            {hydrated ? "Local Save ON · No Login Required" : "Loading local projects…"}
+          </Text>
+        </View>
       </View>
 
       <Card>
@@ -367,20 +556,83 @@ export default function HomeScreen() {
 
           {completed ? (
             <View style={{ gap: 10 }}>
-              <ActionButton label="⬇ Download Final WAV" onPress={downloadFinal} />
-              <ActionButton label="⬇ Download Project ZIP" onPress={downloadBundle} secondary />
+              <ActionButton label="⬇ Save Final WAV" onPress={() => void saveArtifact("final", "wav")} />
+              <ActionButton label="⬇ Save Cleaned Vocal" onPress={() => void saveArtifact("vocal", "wav")} secondary />
+              <ActionButton label="⬇ Save Backing" onPress={() => void saveArtifact("backing", "wav")} secondary />
+              <ActionButton label="⬇ Save Project ZIP" onPress={() => void saveArtifact("bundle", "zip")} secondary />
               <Text selectable style={{ color: "#70798a", fontSize: 12, lineHeight: 18 }}>
-                Download the final WAV first to unlock local playback.
+                Files are saved under the app's persistent Documents storage so they are not treated as temporary cache.
               </Text>
             </View>
           ) : null}
         </Card>
       )}
 
-      {downloadedUri?.endsWith(".wav") ? <AudioPreview uri={downloadedUri} /> : null}
+      {localArtifacts?.final && new File(localArtifacts.final).exists ? (
+        <AudioPreview uri={localArtifacts.final} />
+      ) : null}
+
+      <Card>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <View style={{ gap: 3, flex: 1 }}>
+            <Text selectable style={{ color: "#f5f7fb", fontSize: 17, fontWeight: "800" }}>
+              05 · Local Project History
+            </Text>
+            <Text selectable style={{ color: "#7f8899", fontSize: 12 }}>
+              Up to 25 recent projects are kept on this device.
+            </Text>
+          </View>
+          <TinyButton
+            label="Refresh"
+            onPress={() => {
+              void loadProjects().then(setProjects);
+            }}
+          />
+        </View>
+
+        {projects.length === 0 ? (
+          <Text selectable style={{ color: "#8f98aa", fontSize: 13, lineHeight: 19 }}>
+            No saved projects yet. Starting a build creates the first local project automatically.
+          </Text>
+        ) : (
+          <View style={{ gap: 9 }}>
+            {projects.slice(0, 8).map((saved) => (
+              <View
+                key={saved.id}
+                style={{
+                  borderWidth: 1,
+                  borderColor: "#292f3c",
+                  borderRadius: 14,
+                  padding: 12,
+                  gap: 8,
+                }}
+              >
+                <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text selectable numberOfLines={1} style={{ color: "#dce2ec", fontWeight: "800" }}>
+                      {saved.title}
+                    </Text>
+                    <Text selectable style={{ color: "#737d8f", fontSize: 11 }}>
+                      {new Date(saved.updatedAt).toLocaleString()} · {saved.job?.status || "Draft"}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 7 }}>
+                    <TinyButton label="Open" onPress={() => void openProject(saved)} />
+                    <TinyButton label="Delete" danger onPress={() => void deleteSavedProject(saved.id)} />
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </Card>
 
       <Text selectable style={{ color: "#70798a", fontSize: 12, lineHeight: 18 }}>
         {message}
+      </Text>
+
+      <Text selectable style={{ color: "#555e6e", fontSize: 11, lineHeight: 17 }}>
+        Cloud account/login is not required for local saving. When multi-device sync is added later, an account will be used to associate cloud projects with you.
       </Text>
 
       <Text selectable style={{ color: "#555e6e", fontSize: 11, lineHeight: 17 }}>
