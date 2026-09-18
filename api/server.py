@@ -4,6 +4,8 @@ import json
 import os
 import threading
 import uuid
+
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
@@ -15,7 +17,9 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from ai.full_song_pipeline import FullSongPipelineConfig, build_full_song_pipeline
 from ai.song_builder import SongSection
-from utils.audio_utils import load_audio
+from mixing.mastering import MasteringConfig, master_audio
+from mixing.mixer import mix_audio_arrays
+from utils.audio_utils import load_audio, save_wav
 from vocal.analyzer import analyze_vocal
 
 
@@ -255,11 +259,13 @@ def download_song_artifact(job_id: str, artifact: str) -> FileResponse:
     if not result:
         raise HTTPException(status_code=409, detail="Job has no completed artifacts")
 
+    remix = job.get("remix") or {}
     mapping = {
         "final": result.get("final_path"),
         "vocal": result.get("vocal_path"),
         "backing": result.get("backing_path"),
         "bundle": result.get("bundle_path"),
+        "remix": remix.get("final_path"),
     }
     path_value = mapping.get(artifact)
     if not path_value:
