@@ -150,3 +150,57 @@ export async function generateMusicParts(
   if (!response.ok) throw await parseError(response);
   return response.json();
 }
+
+export type ClipEditAction = "clean" | "fix-pitch" | "fix-timing";
+
+export type ClipEditResult = {
+  job_id: string;
+  edit_id: string;
+  status: "completed";
+  action: ClipEditAction;
+  source: "vocal" | "backing";
+  download: string;
+};
+
+export async function editSongClip(
+  jobId: string,
+  values: {
+    source: "vocal" | "backing";
+    action: ClipEditAction;
+    strength?: number;
+  },
+): Promise<ClipEditResult> {
+  requireApiUrl();
+  const form = new FormData();
+  form.append("source", values.source);
+  form.append("action", values.action);
+  form.append("strength", String(values.strength ?? 0.65));
+
+  const response = await fetch(
+    `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/clip-edit`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}
+
+export async function downloadClipEdit(
+  jobId: string,
+  editId: string,
+  extension = "wav",
+) {
+  const exportDirectory = new Directory(Paths.document, "exports");
+  exportDirectory.create({ idempotent: true, intermediates: true });
+
+  const filename = `je_ai_clip_${encodeURIComponent(editId)}_${Date.now()}.${extension}`;
+  const destination = new File(exportDirectory, filename);
+  const downloaded = await File.downloadFileAsync(
+    `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/clip-edits/${encodeURIComponent(editId)}`,
+    destination,
+    { idempotent: true },
+  );
+  return downloaded.uri;
+}
