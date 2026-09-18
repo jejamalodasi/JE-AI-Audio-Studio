@@ -120,16 +120,26 @@ def _build_config(raw: dict[str, Any]) -> FullSongPipelineConfig:
 
 
 def _run_song_job(job_id: str, source_path: Path, output_path: Path, config: FullSongPipelineConfig) -> None:
-    _job_update(job_id, status="running", stage="processing")
+    def progress(value: float, stage: str) -> None:
+        _job_update(
+            job_id,
+            status="running",
+            progress=max(0.0, min(100.0, float(value))),
+            stage=str(stage),
+        )
+
+    progress(0.0, "starting")
     try:
         result = build_full_song_pipeline(
             str(source_path),
             config=config,
             output_path=str(output_path),
+            progress_callback=progress,
         )
         _job_update(
             job_id,
             status="completed",
+            progress=100.0,
             stage="done",
             result={
                 key: value
