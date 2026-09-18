@@ -83,7 +83,7 @@ def _clean_vocal(y: np.ndarray, sr: int, mode: str) -> np.ndarray:
     selected = str(mode or "basic").strip().lower()
     if selected in {"none", "original", "off"}:
         return np.asarray(y, dtype=np.float32)
-    if selected in {"basic", "vocal fix"}:
+    if selected in {"basic", "vocal fix", "basic-vocal-fix"}:
         return vocal_fix(
             y,
             sr,
@@ -95,7 +95,7 @@ def _clean_vocal(y: np.ndarray, sr: int, mode: str) -> np.ndarray:
                 normalize_output=True,
             ),
         )
-    if selected in {"advanced", "advanced vocal fix"}:
+    if selected in {"advanced", "advanced vocal fix", "advanced-vocal-fix"}:
         return advanced_vocal_fix(
             y,
             sr,
