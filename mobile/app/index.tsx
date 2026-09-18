@@ -197,6 +197,8 @@ export default function HomeScreen() {
   function projectSnapshot(
     nextJob: SongJob | undefined = job ?? undefined,
     nextArtifacts = localArtifacts,
+    nextMusicParts = musicParts,
+    nextTrackMix = trackMix,
   ): LocalProject {
     const now = new Date().toISOString();
     return {
@@ -208,8 +210,8 @@ export default function HomeScreen() {
       config,
       job: nextJob,
       localArtifacts: nextArtifacts,
-      musicParts,
-      trackMix,
+      musicParts: nextMusicParts,
+      trackMix: nextTrackMix,
     };
   }
 
@@ -621,11 +623,19 @@ export default function HomeScreen() {
           trackSettings={trackMix}
           onTrackSettingsChange={(settings) => {
             setTrackMix(settings);
-            if (hydrated) void persistHistory(job, localArtifacts);
+            if (hydrated) {
+              void upsertProject(projectSnapshot(job, localArtifacts, musicParts, settings)).then(() =>
+                loadProjects().then(setProjects),
+              );
+            }
           }}
           onMusicPartsChange={(parts) => {
             setMusicParts(parts);
-            if (hydrated) void persistHistory(job, localArtifacts);
+            if (hydrated) {
+              void upsertProject(projectSnapshot(job, localArtifacts, parts, trackMix)).then(() =>
+                loadProjects().then(setProjects),
+              );
+            }
           }}
           onMessage={setMessage}
         />
