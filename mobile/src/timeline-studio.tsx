@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import * as Sharing from "expo-sharing";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
-import { downloadArtifact, generateMusicParts } from "./api";
+import { downloadArtifact, downloadClipEdit, editSongClip, generateMusicParts } from "./api";
+import type { ClipEditAction } from "./api";
 import type {
   MusicPartFiles,
   SongConfig,
@@ -176,6 +177,7 @@ export function TimelineStudio({
   );
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [buildingParts, setBuildingParts] = useState(false);
+  const [editingAction, setEditingAction] = useState<ClipEditAction | null>(null);
 
   useEffect(() => {
     if (initialTimeline) setTimeline(initialTimeline);
@@ -356,6 +358,49 @@ export function TimelineStudio({
       updateClip(selectedClip.id, { fadeOutSec: selectedClip.fadeOutSec > 0 ? 0 : 0.5 });
     }
     onMessage(`${kind === "in" ? "Fade in" : "Fade out"} metadata toggled.`);
+  }
+
+  async function runClipAIAction(action: ClipEditAction) {
+    if (!selectedClip || selectedClip.kind !== "audio") {
+      onMessage("Select an audio clip before running an AI clip action.");
+      return;
+    }
+
+    const source = selectedClip.sourceArtifact;
+    if (!source) {
+      onMessage("This clip has no editable audio source.");
+      return;
+    }
+    if ((action === "fix-pitch" || action === "fix-timing") && source !== "vocal") {
+      onMessage("Pitch and timing correction are currently available for vocal clips only.");
+      return;
+    }
+
+    setEditingAction(action);
+    onMessage(`Running ${action} on ${selectedClip.label}…`);
+
+    try {
+      const result = await editSongClip(jobId, {
+        source,
+        action,
+        strength: 0.65,
+      });
+      const localUri = await downloadClipEdit(jobId, result.edit_id, "wav");
+      const editedClip: TimelineClip = {
+        ...selectedClip,
+        sourceUri: localUri,
+        label: `${selectedClip.label} · ${action}`,
+      };
+      updateClip(selectedClip.id, {
+        sourceUri: localUri,
+        label: editedClip.label,
+      });
+      onMessage(`✅ ${action} finished. The selected clip now points to the new local WAV.`);
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : "AI clip edit failed.");
+    } finally {
+      setEditingAction(null);
+    }
   }
 
   function updateTrack(id: TrackId, patch: Partial<TrackMixState>) {
@@ -672,12 +717,35 @@ export function TimelineStudio({
           <View style={{ borderTopWidth: 1, borderTopColor: "#202633", paddingTop: 8, gap: 4 }}>
             <Text selectable style={{ color: "#8e98a8", fontSize: 10, fontWeight: "800" }}>AI CLIP EDITOR</Text>
             <Text selectable style={{ color: "#5e6878", fontSize: 10, lineHeight: 15 }}>
-              Clip AI actions are shown as a dedicated surface now; server wiring will call real DSP/AI jobs rather than pretending they ran locally.
+              Clean, Pitch and Timing call real server-side DSP and return a new local WAV. Regenerate, Harmony and Extend stay disabled until their dedicated AI jobs exist.
             </Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-              {["Clean", "Fix Pitch", "Fix Timing", "Regenerate", "Harmony", "Extend"].map((label) => (
-                <Button key={label} label={label} disabled onPress={() => undefined} />
-              ))}
+              <Button
+                label={editingAction === "clean" ? "Cleaning…" : "Clean"}
+                disabled={editingAction !== null || selectedClip.kind !== "audio"}
+                onPress={() => void runClipAIAction("clean")}
+              />
+              <Button
+                label={editingAction === "fix-pitch" ? "Fixing Pitch…" : "Fix Pitch"}
+                disabled={
+                  editingAction !== null ||
+                  selectedClip.kind !== "audio" ||
+                  selectedClip.sourceArtifact !== "vocal"
+                }
+                onPress={() => void runClipAIAction("fix-pitch")}
+              />
+              <Button
+                label={editingAction === "fix-timing" ? "Fixing Timing…" : "Fix Timing"}
+                disabled={
+                  editingAction !== null ||
+                  selectedClip.kind !== "audio" ||
+                  selectedClip.sourceArtifact !== "vocal"
+                }
+                onPress={() => void runClipAIAction("fix-timing")}
+              />
+              <Button label="Regenerate" disabled onPress={() => undefined} />
+              <Button label="Harmony" disabled onPress={() => undefined} />
+              <Button label="Extend" disabled onPress={() => undefined} />
             </View>
           </View>
         </View>
