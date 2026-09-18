@@ -1,5 +1,13 @@
 import { Directory, File, Paths } from "expo-file-system";
-import type { MidiNote, PickedAudio, SongConfig, SongJob } from "./types";
+import type {
+  MidiNote,
+  PickedAudio,
+  SongConfig,
+  SongJob,
+  TimelineRenderResult,
+  TimelineState,
+  TrackMixSettings,
+} from "./types";
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/$/, "");
 
@@ -215,6 +223,63 @@ export async function getMidiNotes(
   requireApiUrl();
   const response = await fetch(
     `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/midi/${encodeURIComponent(part)}`,
+  );
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}
+
+
+export type MidiEditResult = {
+  job_id: string;
+  part: "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement";
+  filename: string;
+  download: string;
+};
+
+export async function saveMidiEdits(
+  jobId: string,
+  values: {
+    part: "melody" | "chords" | "bass" | "drums" | "rhythm" | "arrangement";
+    notes: Array<{
+      note: number;
+      velocity: number;
+      startBeat: number;
+      durationBeat: number;
+    }>;
+    bpm: number;
+  },
+): Promise<MidiEditResult> {
+  requireApiUrl();
+  const response = await fetch(
+    `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/midi-edit`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    },
+  );
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}
+
+export async function renderTimeline(
+  jobId: string,
+  values: {
+    timeline: TimelineState;
+    trackMix: TrackMixSettings;
+    targetPeak: number;
+    compressionRatio: number;
+    saturation: number;
+  },
+): Promise<TimelineRenderResult> {
+  requireApiUrl();
+  const response = await fetch(
+    `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/render-timeline`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    },
   );
   if (!response.ok) throw await parseError(response);
   return response.json();
