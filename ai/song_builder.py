@@ -178,6 +178,14 @@ def build_song_sketch(
     generated_sections: list[dict[str, Any]] = []
     chunks: list[tuple[np.ndarray, int]] = []
 
+    persistent_final = Path(output_path) if output_path else source.with_name(f"{source.stem}_ai_song_sketch.wav")
+    persistent_preview = persistent_final.with_name(f"{persistent_final.stem}_vocal_preview.wav")
+    persistent_bundle = (
+        persistent_final.with_suffix(".zip")
+        if output_path
+        else source.with_name(f"{source.stem}_ai_song_sketch.zip")
+    )
+
     with tempfile.TemporaryDirectory(prefix="je_song_builder_") as tmp:
         work_dir = Path(tmp)
         reference_path = _prepare_reference(str(source), work_dir)
@@ -218,12 +226,8 @@ def build_song_sketch(
 
         final_audio, sample_rate = _crossfade_join(chunks, cfg.crossfade_seconds)
 
-        if output_path is None:
-            final_file = source.with_name(f"{source.stem}_ai_song_sketch.wav")
-        else:
-            final_file = Path(output_path)
-            final_file.parent.mkdir(parents=True, exist_ok=True)
-        save_wav(final_audio, sample_rate, str(final_file))
+        persistent_final.parent.mkdir(parents=True, exist_ok=True)
+        save_wav(final_audio, sample_rate, str(persistent_final))
 
         vocal_path = _prepare_vocal_preview(str(source), sample_rate, final_audio.shape[0], work_dir)
         vocal_audio, _ = load_audio(vocal_path, mono=False)
@@ -231,8 +235,7 @@ def build_song_sketch(
             [vocal_audio, final_audio],
             gains_db=[float(cfg.vocal_gain_db), float(cfg.music_gain_db)],
         )
-        preview_file = final_file.with_name(f"{final_file.stem}_vocal_preview.wav")
-        save_wav(full_song, sample_rate, str(preview_file))
+        save_wav(full_song, sample_rate, str(persistent_preview))
 
         export_dir = work_dir / "export"
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -262,23 +265,13 @@ def build_song_sketch(
         }
         (export_dir / "song_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        bundle_path = (
-            Path(output_path).with_suffix(".zip")
-            if output_path
-            else source.with_name(f"{source.stem}_ai_song_sketch.zip")
-        )
+        bundle_path = persistent_bundle
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
             for file in export_dir.iterdir():
                 bundle.write(file, arcname=file.name)
 
-        final_real_path = str(final_file)
-        if final_file.parent == work_dir:
-            persistent = source.with_name(f"{source.stem}_ai_song_sketch.wav")
-            persistent_preview = source.with_name(f"{source.stem}_ai_song_sketch_vocal_preview.wav")
-            save_wav(final_audio, sample_rate, str(persistent))
-            save_wav(full_song, sample_rate, str(persistent_preview))
-            final_real_path = str(persistent)
-            preview_file = persistent_preview
+        final_real_path = str(persistent_final)
 
     return {
         "output_path": final_real_path,
