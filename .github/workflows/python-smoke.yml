@@ -34,17 +34,20 @@ jobs:
           from ai.musicgen_melody import MusicGenConfig
           from ai.pitch_timing_ai import correct_pitch_timing_ai
           from ai.song_builder import SongBuilderConfig, SongSection, build_song_sketch
+          from ai.full_song_pipeline import FullSongPipelineConfig, build_full_song_pipeline
           print("✅ app import")
           print("✅ conditioned music import")
           print("✅ arrangement import")
           print("✅ pitch/timing import")
           print("✅ MusicGen backend import")
           print("✅ Song Builder import")
+          print("✅ Full song pipeline import")
           print("✅ build_app symbol:", callable(build_app))
           print("✅ arrangement symbol:", callable(generate_ai_conditioned_arrangement))
           print("✅ conditioning symbol:", callable(condition_vocal_to_music))
           print("✅ pitch/timing symbol:", callable(correct_pitch_timing_ai))
           print("✅ Song Builder symbol:", callable(build_song_sketch))
           print("✅ Song Builder config:", SongBuilderConfig(sections=(SongSection("Intro", 2),)))
+          print("✅ Full pipeline config:", FullSongPipelineConfig(sections=(SongSection("Intro", 2),)))
           print("✅ MusicGen config:", MusicGenConfig())
           PY
