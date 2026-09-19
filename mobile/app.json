@@ -6,12 +6,13 @@
     "orientation": "portrait",
     "scheme": "jeai",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
     "plugins": [
       "expo-router",
       "expo-document-picker",
       "expo-audio",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-asset",
+      "expo-status-bar"
     ],
     "android": {
       "package": "com.jejamalodasi.jeaiaudiostudio",
